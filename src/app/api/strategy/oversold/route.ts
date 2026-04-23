@@ -51,14 +51,15 @@ export async function GET() {
       });
     }
 
-    // 转换格式
-    const etfs = result.data.map((etf: any) => ({
+    // 转换格式 - 注意：result.data 包含 { summary, etfs }
+    const rawEtfs = result.data.etfs || [];
+    const etfs = rawEtfs.map((etf: any) => ({
       code: etf.code,
       name: etf.name,
-      currentPrice: etf.price,
+      currentPrice: etf.current_price,
       ma10: etf.ma10,
-      lowerBand: etf.ene_lower,
-      distanceToLower: etf.distance_to_lower,
+      lowerBand: etf.lower_band,
+      distanceToLower: etf.dist_to_lower,
       avgMoney: etf.avg_money || 0,
     }));
 
