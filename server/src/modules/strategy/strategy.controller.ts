@@ -20,12 +20,4 @@ export class StrategyController {
   async getOversoldStrategy() {
     return await this.strategyService.getOversoldStrategy();
   }
-
-  /**
-   * 健康检查
-   */
-  @Get('health')
-  health() {
-    return { status: 'ok', timestamp: new Date().toISOString() };
-  }
 }

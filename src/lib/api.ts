@@ -44,9 +44,9 @@ async function fetchAPI<T>(endpoint: string): Promise<T> {
 }
 
 export function getETFStrategy(): Promise<StrategyResponse> {
-  return fetchAPI<StrategyResponse>('/strategy/etf-rotation');
+  return fetchAPI<StrategyResponse>('/api/strategy/etf-rotation');
 }
 
 export function getOversoldStrategy(): Promise<StrategyResponse> {
-  return fetchAPI<StrategyResponse>('/strategy/oversold');
+  return fetchAPI<StrategyResponse>('/api/strategy/oversold');
 }
