@@ -68,6 +68,33 @@ def load_config():
 
     return etfs
 
+def calculate_momentum(prices):
+    """
+    计算动量得分（基于给定价格序列）
+
+    Args:
+        prices: 价格数组
+
+    Returns:
+        tuple: (score, r_squared, slope, ann_return)
+    """
+    y = np.log(prices)
+    x = np.arange(len(y))
+    weights = np.linspace(1, 2, len(y))
+    slope, intercept = np.polyfit(x, y, 1, w=weights)
+
+    # R² 稳定性
+    ss_res = np.sum(weights * (y - (slope * x + intercept)) ** 2)
+    ss_tot = np.sum(weights * (y - np.mean(y)) ** 2)
+    r_squared = 1 - ss_res / ss_tot if ss_tot else 0
+
+    # 综合得分 = 年化(slope*250转指数) * R²
+    ann_return = math.exp(slope * 250) - 1
+    score = ann_return * r_squared
+
+    return score, r_squared, slope, ann_return
+
+
 def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97):
     """
     完全按照聚宽算法实现的动量计算
@@ -99,22 +126,15 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         today_pct = (current_price / last_close - 1) * 100  # 今日涨跌幅
 
         # 2. 动量得分 & 稳定性计算 (线性加权回归)
-        # 使用全部26个数据点进行动量计算
-        y = np.log(prices)
-        x = np.arange(len(y))
-        weights = np.linspace(1, 2, len(y))
-        slope, intercept = np.polyfit(x, y, 1, w=weights)
+        score, r_squared, slope, ann_return = calculate_momentum(prices)
 
-        # R² 稳定性
-        ss_res = np.sum(weights * (y - (slope * x + intercept)) ** 2)
-        ss_tot = np.sum(weights * (y - np.mean(y)) ** 2)
-        r_squared = 1 - ss_res / ss_tot if ss_tot else 0
+        # 3. 计算预估动量得分（假设明天价格不变）
+        # 去掉最老的价格，加上当前最新价格
+        estimated_prices = prices[1:]  # 去掉第一个
+        estimated_prices = np.append(estimated_prices, current_price)  # 末尾再加一个当前价格
+        estimated_score, estimated_r_squared, _, _ = calculate_momentum(estimated_prices)
 
-        # 综合得分 = 年化(slope*250转指数) * R²
-        ann_return = math.exp(slope * 250) - 1
-        score = ann_return * r_squared
-
-        # 3. 状态判定
+        # 4. 状态判定
         status = "正常"
         # 风控：检查最后3个单日跌幅
         ratios = [prices[-1]/prices[-2], prices[-2]/prices[-3], prices[-3]/prices[-4]]
@@ -128,6 +148,7 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
             'code': etf_info['code'],
             'name': etf_info['name'],
             'score': round(score, 4),
+            'estimated_score': round(estimated_score, 4),  # 预估动量得分
             'r_squared': round(r_squared, 3),
             'price': round(current_price, 3),
             'today_pct': round(today_pct, 2),

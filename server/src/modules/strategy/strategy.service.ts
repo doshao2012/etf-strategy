@@ -23,6 +23,7 @@ export interface ETFMetrics {
   code: string;
   name: string;
   score: number;
+  estimatedScore: number;  // 预估动量得分
   rSquared: number;
   price: number;
   todayChange: number;
@@ -156,6 +157,7 @@ export class StrategyService {
         code: etf.code,
         name: etf.name,
         score: etf.score,
+        estimatedScore: etf.estimated_score || etf.score,  // 预估动量得分
         rSquared: etf.r_squared,
         price: etf.price,
         todayChange: etf.today_pct,

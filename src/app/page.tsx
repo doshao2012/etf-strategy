@@ -19,6 +19,7 @@ interface RotationETF {
   code: string;
   name: string;
   score: number;
+  estimatedScore: number;  // 预估动量得分
   rSquared: number;
   price: number;
   todayChange: number;
@@ -101,6 +102,9 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
             <p className="text-xs text-slate-500 mb-1">动量得分</p>
             <p className={`text-xl font-bold ${etf.score >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
               {etf.score.toFixed(4)}
+            </p>
+            <p className={`text-xs font-medium mt-1 ${(etf.estimatedScore || 0) >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
+              预 {(etf.estimatedScore || 0).toFixed(4)}
             </p>
           </div>
           {/* 稳定性 R² */}
