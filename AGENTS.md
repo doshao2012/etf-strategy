@@ -1,65 +1,82 @@
-# 项目上下文
+# ETF轮动策略 - 网页版
 
-### 版本技术栈
+## 项目概述
 
-- **Framework**: Next.js 16 (App Router)
-- **Core**: React 19
-- **Language**: TypeScript 5
-- **UI 组件**: shadcn/ui (基于 Radix UI)
-- **Styling**: Tailwind CSS 4
+基于微信小程序 ETF 轮动策略的移动端适配网页版本。
+
+## 技术栈
+
+- **前端框架**: Next.js 16 (App Router)
+- **UI组件**: shadcn/ui + Tailwind CSS 4
+- **后端**: NestJS (独立服务，端口 3000)
+- **数据**: 模拟数据（用于预览）
 
 ## 目录结构
 
 ```
-├── public/                 # 静态资源
-├── scripts/                # 构建与启动脚本
-│   ├── build.sh            # 构建脚本
-│   ├── dev.sh              # 开发环境启动脚本
-│   ├── prepare.sh          # 预处理脚本
-│   └── start.sh            # 生产环境启动脚本
+.
 ├── src/
-│   ├── app/                # 页面路由与布局
-│   ├── components/ui/      # Shadcn UI 组件库
-│   ├── hooks/              # 自定义 Hooks
-│   ├── lib/                # 工具库
-│   │   └── utils.ts        # 通用工具函数 (cn)
-│   └── server.ts           # 自定义服务端入口
-├── next.config.ts          # Next.js 配置
-├── package.json            # 项目依赖管理
-└── tsconfig.json           # TypeScript 配置
+│   ├── app/
+│   │   ├── layout.tsx          # 根布局
+│   │   ├── page.tsx           # ETF策略主页
+│   │   └── globals.css        # 全局样式
+│   ├── components/ui/         # shadcn/ui 组件库
+│   ├── lib/
+│   │   └── api.ts             # API客户端
+│   └── server.ts              # 自定义服务入口（含API代理）
+├── server/                    # NestJS 后端
+│   ├── src/
+│   │   └── modules/strategy/  # 策略模块
+│   └── package.json
+└── .coze                      # Coze CLI 配置
 ```
 
-- 项目文件（如 app 目录、pages 目录、components 等）默认初始化到 `src/` 目录下。
+## API 接口
 
-## 包管理规范
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/strategy/etf-rotation` | GET | 趋势轮动策略 |
+| `/strategy/oversold` | GET | 超跌策略 |
 
-**仅允许使用 pnpm** 作为包管理器，**严禁使用 npm 或 yarn**。
-**常用命令**：
-- 安装依赖：`pnpm add <package>`
-- 安装开发依赖：`pnpm add -D <package>`
-- 安装所有依赖：`pnpm install`
-- 移除依赖：`pnpm remove <package>`
+## 策略逻辑
 
-## 开发规范
+### 趋势轮动策略
+- **回看周期**: 25 个交易日
+- **筛选条件**: 动量得分 >= 0.0
+- **稳定性**: R² 加权
+- **风控**: 近3日单日跌幅超过3%则拦截
 
-### 编码规范
+### 超跌策略
+- **触发条件**: 近期跌幅 > 3% 且 RSI < 40
+- **用途**: 危机模式，寻找反弹机会
 
-- 默认按 TypeScript `strict` 心智写代码；优先复用当前作用域已声明的变量、函数、类型和导入，禁止引用未声明标识符或拼错变量名。
-- 禁止隐式 `any` 和 `as any`；函数参数、返回值、解构项、事件对象、`catch` 错误在使用前应有明确类型或先完成类型收窄，并清理未使用的变量和导入。
+## 开发命令
 
-### next.config 配置规范
+```bash
+# 安装前端依赖
+pnpm install
 
-- 配置的路径不要写死绝对路径，必须使用 path.resolve(__dirname, ...)、import.meta.dirname 或 process.cwd() 动态拼接。
+# 启动前端开发服务器（端口5000）
+pnpm dev
 
-### Hydration 问题防范
+# 启动后端服务（端口3000）
+cd server && pnpm install && pnpm start
+```
 
-1. 严禁在 JSX 渲染逻辑中直接使用 typeof window、Date.now()、Math.random() 等动态数据。**必须使用 'use client' 并配合 useEffect + useState 确保动态内容仅在客户端挂载后渲染**；同时严禁非法 HTML 嵌套（如 <p> 嵌套 <div>）。
-2. **禁止使用 head 标签**，优先使用 metadata，详见文档：https://nextjs.org/docs/app/api-reference/functions/generate-metadata
-   1. 三方 CSS、字体等资源可在 `globals.css` 中顶部通过 `@import` 引入或使用 next/font
-   2. preload, preconnect, dns-prefetch 通过 ReactDOM 的 preload、preconnect、dns-prefetch 方法引入
-   3. json-ld 可阅读 https://nextjs.org/docs/app/guides/json-ld
+## ETF 品种
 
-## UI 设计与组件规范 (UI & Styling Standards)
+| 代码 | 名称 | 类型 |
+|------|------|------|
+| 159915 | 创业板ETF | 股票 |
+| 518880 | 黄金ETF | 商品 |
+| 513100 | 纳指ETF | 海外 |
+| 511220 | 城投债ETF | 债券 |
+| 588000 | 科创50ETF | 股票 |
+| 159985 | 豆粕ETF | 商品 |
+| 513260 | 恒生科技ETF | 海外 |
 
-- 模板默认预装核心组件库 `shadcn/ui`，位于`src/components/ui/`目录下
-- Next.js 项目**必须默认**采用 shadcn/ui 组件、风格和规范，**除非用户指定用其他的组件和规范。**
+## 注意事项
+
+1. 当前使用模拟数据，需接入真实数据源才能用于实际投资决策
+2. 数据仅供参考，不构成投资建议
+3. 市场有风险，投资需谨慎

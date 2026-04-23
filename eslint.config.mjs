@@ -46,6 +46,10 @@ const eslintConfig = defineConfig([
     'dist/**',
     // Script files (CommonJS):
     'scripts/**/*.js',
+    // Old Taro project files:
+    'projects/**',
+    'dist-tt/**',
+    'dist/**',
   ]),
 ]);
 
