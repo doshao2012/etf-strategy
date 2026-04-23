@@ -548,9 +548,19 @@ export default function ETFRotationPage() {
                     建议持仓
                   </span>
                   <span className="text-sm font-bold text-emerald-600">
-                    {isOversoldMode 
-                      ? (oversoldData?.data.recommend?.[0] || '暂无')
-                      : (rotationData?.data.summary.topPick || '暂无')}
+                    {(() => {
+                      // 趋势轮动：找状态正常且排名第一的
+                      if (!isOversoldMode && rotationData?.data.etfs) {
+                        const normalEtf = rotationData.data.etfs.find((etf, idx) => 
+                          idx === 0 && etf.status === '正常'
+                        );
+                        return normalEtf ? normalEtf.name : '空仓';
+                      }
+                      // 超跌策略：使用第一个推荐
+                      return isOversoldMode 
+                        ? (oversoldData?.data.recommend?.[0] || '空仓')
+                        : '空仓';
+                    })()}
                   </span>
                 </div>
                 <span className="text-xs text-slate-400">
