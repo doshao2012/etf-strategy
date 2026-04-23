@@ -1,20 +1,73 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getETFStrategy, getOversoldStrategy, type ETFMetrics, type StrategyResponse } from '@/lib/api';
+import { getETFStrategy, getOversoldStrategy } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Info, ChevronDown } from 'lucide-react';
+import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Info } from 'lucide-react';
 
 type StrategyType = 'rotation' | 'oversold';
 
-function ETFCard({ etf, rank }: { etf: ETFMetrics; rank: number }) {
+// 趋势轮动ETF数据
+interface RotationETF {
+  code: string;
+  name: string;
+  score: number;
+  rSquared: number;
+  price: number;
+  todayChange: number;
+  status: string;
+  slope?: number;
+  annualReturn?: number;
+}
+
+// 超跌策略ETF数据
+interface OversoldETF {
+  code: string;
+  name: string;
+  currentPrice: number;
+  ma10: number;
+  lowerBand: number;
+  distanceToLower: number;
+  avgMoney: number;
+}
+
+interface RotationResponse {
+  code: number;
+  data: {
+    etfs: RotationETF[];
+    recommend: string[];
+    recommendCode: string | null;
+    timestamp: string;
+    dataSource: string;
+    summary: {
+      total: number;
+      recommended: number;
+      topPick: string;
+    };
+  };
+  message: string;
+}
+
+interface OversoldResponse {
+  code: number;
+  data: {
+    etfs: OversoldETF[];
+    recommend: string[];
+    timestamp: string;
+    dataSource: string;
+    summary: string;
+  };
+  message: string;
+}
+
+// 趋势轮动卡片
+function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
   const isPositive = etf.todayChange >= 0;
   const isRecommended = rank === 1 && etf.status === '正常';
   const isWarning = etf.status.includes('拦截') || etf.status.includes('过低');
-  const isOversold = etf.status === '超跌信号';
 
   return (
     <Card className={`mb-3 ${isRecommended ? 'border-green-500 shadow-lg' : ''} ${isWarning ? 'border-orange-300' : ''}`}>
@@ -57,13 +110,9 @@ function ETFCard({ etf, rank }: { etf: ETFMetrics; rank: number }) {
           </div>
         </div>
         
-        {/* Status */}
         <div className="mt-3 flex items-center gap-2">
           {isRecommended && (
             <Badge className="bg-green-500">推荐持有</Badge>
-          )}
-          {isOversold && (
-            <Badge className="bg-orange-500">超跌信号</Badge>
           )}
           {isWarning && (
             <Badge variant="destructive">
@@ -71,12 +120,11 @@ function ETFCard({ etf, rank }: { etf: ETFMetrics; rank: number }) {
               {etf.status}
             </Badge>
           )}
-          {!isRecommended && !isOversold && !isWarning && (
+          {!isRecommended && !isWarning && (
             <Badge variant="outline">{etf.status}</Badge>
           )}
         </div>
         
-        {/* Recommendation Badge */}
         {isRecommended && (
           <div className="mt-3 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
             <p className="text-sm font-medium text-green-700 dark:text-green-400">
@@ -89,34 +137,86 @@ function ETFCard({ etf, rank }: { etf: ETFMetrics; rank: number }) {
   );
 }
 
-function StrategySkeleton() {
+// 超跌策略卡片
+function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
+  const isNearLower = etf.distanceToLower < 5;
+  
   return (
-    <div className="space-y-3">
-      {[1, 2, 3, 4, 5, 6, 7].map((i) => (
-        <Card key={i}>
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <Skeleton className="h-6 w-32" />
-              <Skeleton className="h-6 w-20" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-4">
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
+    <Card className={`mb-3 ${isNearLower ? 'border-orange-500 shadow-lg' : ''}`}>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Badge variant={isNearLower ? 'default' : 'secondary'} className={isNearLower ? 'bg-orange-500' : ''}>
+              #{rank}
+            </Badge>
+            <CardTitle className="text-lg">{etf.name}</CardTitle>
+            <span className="text-sm text-muted-foreground">{etf.code}</span>
+          </div>
+          <div className="text-right">
+            <p className="text-sm text-muted-foreground">距ENE下轨</p>
+            <p className={`text-xl font-bold ${isNearLower ? 'text-orange-500' : 'text-gray-600'}`}>
+              {etf.distanceToLower.toFixed(2)}%
+            </p>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-sm text-muted-foreground">当前价格</p>
+            <p className="text-2xl font-bold">¥{etf.currentPrice.toFixed(3)}</p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">ENE下轨</p>
+            <p className="text-2xl font-bold text-green-600">¥{etf.lowerBand.toFixed(3)}</p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">10日均线</p>
+            <p className="text-xl font-semibold">¥{etf.ma10.toFixed(3)}</p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">日均成交额</p>
+            <p className="text-xl font-semibold">{(etf.avgMoney / 10000).toFixed(0)}万</p>
+          </div>
+        </div>
+        
+        {isNearLower && (
+          <div className="mt-3 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
+            <p className="text-sm font-medium text-orange-700 dark:text-orange-400 flex items-center gap-1">
+              <AlertTriangle className="h-4 w-4" />
+              接近ENE下轨，关注反弹机会
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SkeletonCard() {
+  return (
+    <Card className="mb-3">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-6 w-40" />
+          <Skeleton className="h-6 w-20" />
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 gap-4">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
 export default function ETFRotationPage() {
-  const [strategyData, setStrategyData] = useState<StrategyResponse | null>(null);
-  const [oversoldData, setOversoldData] = useState<StrategyResponse | null>(null);
+  const [rotationData, setRotationData] = useState<RotationResponse | null>(null);
+  const [oversoldData, setOversoldData] = useState<OversoldResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string>('');
@@ -127,13 +227,13 @@ export default function ETFRotationPage() {
     setError(null);
     
     try {
-      const [strategy, oversold] = await Promise.all([
+      const [rotation, oversold] = await Promise.all([
         getETFStrategy(),
         getOversoldStrategy(),
       ]);
       
-      setStrategyData(strategy);
-      setOversoldData(oversold);
+      setRotationData(rotation as RotationResponse);
+      setOversoldData(oversold as OversoldResponse);
       setLastUpdate(new Date().toLocaleTimeString('zh-CN'));
     } catch (err) {
       setError(err instanceof Error ? err.message : '获取数据失败');
@@ -148,8 +248,8 @@ export default function ETFRotationPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const currentData = currentStrategy === 'rotation' ? strategyData : oversoldData;
   const isOversoldMode = currentStrategy === 'oversold';
+  const currentData = isOversoldMode ? oversoldData : rotationData;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
@@ -163,7 +263,6 @@ export default function ETFRotationPage() {
             </div>
             
             <div className="flex items-center gap-3">
-              {/* Strategy Selector */}
               <Select value={currentStrategy} onValueChange={(v) => setCurrentStrategy(v as StrategyType)}>
                 <SelectTrigger className="w-[140px]">
                   <SelectValue />
@@ -184,7 +283,6 @@ export default function ETFRotationPage() {
                 </SelectContent>
               </Select>
 
-              {/* Refresh Button */}
               <button
                 onClick={fetchData}
                 disabled={loading}
@@ -203,14 +301,18 @@ export default function ETFRotationPage() {
           <CardContent className="py-3 flex items-center gap-2">
             <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
             <p className="text-sm text-blue-700 dark:text-blue-400">
-              基于25日动量得分筛选，R²稳定性加权，配合3%跌幅风控拦截
+              {isOversoldMode 
+                ? '基于ENE布林下轨策略，寻找超跌反弹机会' 
+                : '基于25日动量得分筛选，R²稳定性加权，配合3%跌幅风控拦截'}
             </p>
           </CardContent>
         </Card>
 
         {/* Content */}
         {loading && !currentData ? (
-          <StrategySkeleton />
+          <div className="space-y-3">
+            {[1, 2, 3, 4, 5].map((i) => <SkeletonCard key={i} />)}
+          </div>
         ) : error ? (
           <Card className="p-6 text-center">
             <p className="text-red-500 mb-4">{error}</p>
@@ -229,12 +331,12 @@ export default function ETFRotationPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm opacity-90">
-                      {isOversoldMode ? '超跌信号' : '当前推荐'}
+                      {isOversoldMode ? 'ENE下轨Top10' : '当前推荐'}
                     </p>
                     <p className="text-2xl font-bold">
-                      {isOversoldMode
-                        ? `${currentData?.data.summary.oversoldSignals || 0} 个`
-                        : currentData?.data.summary.topPick}
+                      {isOversoldMode 
+                        ? `${currentData?.data.etfs.length || 0} 只` 
+                        : (rotationData?.data.summary.topPick || '暂无')}
                     </p>
                   </div>
                   <div className="text-right">
@@ -247,9 +349,15 @@ export default function ETFRotationPage() {
 
             {/* ETF List */}
             <div className="space-y-3">
-              {currentData?.data.etfs.map((etf, index) => (
-                <ETFCard key={etf.code} etf={etf} rank={index + 1} />
-              ))}
+              {isOversoldMode ? (
+                (oversoldData?.data.etfs || []).map((etf, index) => (
+                  <OversoldCard key={etf.code} etf={etf} rank={index + 1} />
+                ))
+              ) : (
+                (rotationData?.data.etfs || []).map((etf, index) => (
+                  <RotationCard key={etf.code} etf={etf} rank={index + 1} />
+                ))
+              )}
             </div>
           </>
         )}
