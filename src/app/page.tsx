@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { getETFStrategy, getOversoldStrategy, type ETFMetrics, type StrategyResponse } from '@/lib/api';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Info } from 'lucide-react';
+import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Info, ChevronDown } from 'lucide-react';
+
+type StrategyType = 'rotation' | 'oversold';
 
 function ETFCard({ etf, rank }: { etf: ETFMetrics; rank: number }) {
   const isPositive = etf.todayChange >= 0;
@@ -118,6 +120,7 @@ export default function ETFRotationPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string>('');
+  const [currentStrategy, setCurrentStrategy] = useState<StrategyType>('rotation');
 
   const fetchData = async () => {
     setLoading(true);
@@ -141,9 +144,12 @@ export default function ETFRotationPage() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 60000); // Refresh every minute
+    const interval = setInterval(fetchData, 60000);
     return () => clearInterval(interval);
   }, []);
+
+  const currentData = currentStrategy === 'rotation' ? strategyData : oversoldData;
+  const isOversoldMode = currentStrategy === 'oversold';
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
@@ -155,13 +161,38 @@ export default function ETFRotationPage() {
               <h1 className="text-2xl font-bold">ETF轮动策略</h1>
               <p className="text-sm text-muted-foreground">智能轮动 · 趋势追踪</p>
             </div>
-            <button
-              onClick={fetchData}
-              disabled={loading}
-              className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              <RefreshCw className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
-            </button>
+            
+            <div className="flex items-center gap-3">
+              {/* Strategy Selector */}
+              <Select value={currentStrategy} onValueChange={(v) => setCurrentStrategy(v as StrategyType)}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="rotation">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4" />
+                      趋势轮动
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="oversold">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4" />
+                      超跌策略
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Refresh Button */}
+              <button
+                onClick={fetchData}
+                disabled={loading}
+                className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <RefreshCw className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -177,105 +208,51 @@ export default function ETFRotationPage() {
           </CardContent>
         </Card>
 
-        {/* Tabs */}
-        <Tabs defaultValue="rotation" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-6">
-            <TabsTrigger value="rotation" className="flex items-center gap-2">
-              <TrendingUp className="h-4 w-4" />
-              趋势轮动
-            </TabsTrigger>
-            <TabsTrigger value="oversold" className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4" />
-              超跌策略
-            </TabsTrigger>
-          </TabsList>
-
-          {/* 趋势轮动 Tab */}
-          <TabsContent value="rotation">
-            {loading && !strategyData ? (
-              <StrategySkeleton />
-            ) : error ? (
-              <Card className="p-6 text-center">
-                <p className="text-red-500 mb-4">{error}</p>
-                <button
-                  onClick={fetchData}
-                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90"
-                >
-                  重试
-                </button>
-              </Card>
-            ) : (
-              <>
-                {/* Summary */}
-                <Card className="mb-6 bg-gradient-to-r from-green-500 to-emerald-600 text-white">
-                  <CardContent className="py-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm opacity-90">当前推荐</p>
-                        <p className="text-2xl font-bold">{strategyData?.data.summary.topPick}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm opacity-90">更新时间</p>
-                        <p className="text-sm">{lastUpdate}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* ETF List */}
-                <div className="space-y-3">
-                  {strategyData?.data.etfs.map((etf, index) => (
-                    <ETFCard key={etf.code} etf={etf} rank={index + 1} />
-                  ))}
+        {/* Content */}
+        {loading && !currentData ? (
+          <StrategySkeleton />
+        ) : error ? (
+          <Card className="p-6 text-center">
+            <p className="text-red-500 mb-4">{error}</p>
+            <button
+              onClick={fetchData}
+              className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90"
+            >
+              重试
+            </button>
+          </Card>
+        ) : (
+          <>
+            {/* Summary Card */}
+            <Card className={`mb-6 text-white ${isOversoldMode ? 'bg-gradient-to-r from-orange-500 to-amber-600' : 'bg-gradient-to-r from-green-500 to-emerald-600'}`}>
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm opacity-90">
+                      {isOversoldMode ? '超跌信号' : '当前推荐'}
+                    </p>
+                    <p className="text-2xl font-bold">
+                      {isOversoldMode
+                        ? `${currentData?.data.summary.oversoldSignals || 0} 个`
+                        : currentData?.data.summary.topPick}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm opacity-90">更新时间</p>
+                    <p className="text-sm">{lastUpdate}</p>
+                  </div>
                 </div>
-              </>
-            )}
-          </TabsContent>
+              </CardContent>
+            </Card>
 
-          {/* 超跌策略 Tab */}
-          <TabsContent value="oversold">
-            {loading && !oversoldData ? (
-              <StrategySkeleton />
-            ) : error ? (
-              <Card className="p-6 text-center">
-                <p className="text-red-500 mb-4">{error}</p>
-                <button
-                  onClick={fetchData}
-                  className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90"
-                >
-                  重试
-                </button>
-              </Card>
-            ) : (
-              <>
-                {/* Summary */}
-                <Card className="mb-6 bg-gradient-to-r from-orange-500 to-amber-600 text-white">
-                  <CardContent className="py-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm opacity-90">超跌信号</p>
-                        <p className="text-2xl font-bold">
-                          {oversoldData?.data.summary.oversoldSignals || 0} 个
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm opacity-90">更新时间</p>
-                        <p className="text-sm">{lastUpdate}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* ETF List */}
-                <div className="space-y-3">
-                  {oversoldData?.data.etfs.map((etf, index) => (
-                    <ETFCard key={etf.code} etf={etf} rank={index + 1} />
-                  ))}
-                </div>
-              </>
-            )}
-          </TabsContent>
-        </Tabs>
+            {/* ETF List */}
+            <div className="space-y-3">
+              {currentData?.data.etfs.map((etf, index) => (
+                <ETFCard key={etf.code} etf={etf} rank={index + 1} />
+              ))}
+            </div>
+          </>
+        )}
 
         {/* Footer */}
         <div className="mt-8 text-center text-sm text-muted-foreground">
