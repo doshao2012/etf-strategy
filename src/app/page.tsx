@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Info, Settings, Plus, Pencil, Trash2 } from 'lucide-react';
+import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Info, Settings, Plus, Pencil, Trash2, Sparkles, Zap, Clock } from 'lucide-react';
 
 type StrategyType = 'rotation' | 'oversold';
 
@@ -65,152 +65,242 @@ interface OversoldResponse {
   message: string;
 }
 
-// 趋势轮动卡片
+// 趋势轮动卡片 - 现代化设计
 function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
   const isPositive = etf.todayChange >= 0;
   const isRecommended = rank === 1 && etf.status === '正常';
   const isWarning = etf.status.includes('拦截') || etf.status.includes('过低');
 
+  // 排名颜色
+  const rankColors = [
+    'bg-gradient-to-br from-amber-400 to-orange-500 text-white',
+    'bg-gradient-to-br from-slate-300 to-slate-400 text-slate-800',
+    'bg-gradient-to-br from-amber-600 to-amber-700 text-white',
+  ];
+
   return (
-    <Card className={`mb-3 ${isRecommended ? 'border-green-500 shadow-lg' : ''} ${isWarning ? 'border-orange-300' : ''}`}>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Badge variant={isRecommended ? 'default' : 'secondary'} className={isRecommended ? 'bg-green-500' : ''}>
+    <div className={`
+      relative overflow-hidden rounded-2xl transition-all duration-300 hover:scale-[1.01] hover:shadow-xl
+      ${isRecommended 
+        ? 'bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 border-2 border-emerald-200 dark:border-emerald-800' 
+        : 'bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700'}
+    `}>
+      {/* 顶部装饰条 */}
+      {isRecommended && (
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400" />
+      )}
+
+      <div className="p-4">
+        {/* 头部：排名 + 名称 + 涨跌幅 */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            {/* 排名徽章 */}
+            <div className={`
+              w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shadow-lg
+              ${rank <= 3 ? rankColors[rank - 1] : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}
+            `}>
               #{rank}
-            </Badge>
-            <CardTitle className="text-lg">{etf.name}</CardTitle>
-            <span className="text-sm text-muted-foreground">{etf.code}</span>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-lg">{etf.name}</h3>
+                {isRecommended && (
+                  <Sparkles className="w-4 h-4 text-emerald-500 animate-pulse" />
+                )}
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{etf.code}</p>
+            </div>
           </div>
-          <div className={`flex items-center gap-1 ${isPositive ? 'text-red-500' : 'text-green-500'}`}>
-            {isPositive ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
-            <span className="font-bold">{isPositive ? '+' : ''}{etf.todayChange}%</span>
+
+          {/* 涨跌幅 */}
+          <div className={`
+            flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold
+            ${isPositive 
+              ? 'bg-red-50 dark:bg-red-950/50 text-red-600 dark:text-red-400' 
+              : 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400'}
+          `}>
+            {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+            <span>{isPositive ? '+' : ''}{etf.todayChange}%</span>
           </div>
         </div>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <p className="text-sm text-muted-foreground">动量得分</p>
-            <p className={`text-2xl font-bold ${etf.score >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {etf.score.toFixed(4)}
+
+        {/* 数据指标 */}
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 text-center">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">动量得分</p>
+            <p className={`text-lg font-bold ${etf.score >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+              {etf.score >= 0 ? '+' : ''}{etf.score.toFixed(3)}
             </p>
           </div>
-          <div>
-            <p className="text-sm text-muted-foreground">稳定性 R²</p>
-            <p className="text-2xl font-bold">{etf.rSquared.toFixed(3)}</p>
+          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 text-center">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">稳定性 R²</p>
+            <p className="text-lg font-bold text-slate-700 dark:text-slate-200">
+              {etf.rSquared.toFixed(3)}
+            </p>
           </div>
-          <div className="col-span-2">
-            <p className="text-sm text-muted-foreground">当前价格</p>
-            <p className="text-xl font-semibold">¥{etf.price.toFixed(3)}</p>
+          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 text-center">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">当前价格</p>
+            <p className="text-lg font-bold text-slate-700 dark:text-slate-200">
+              ¥{etf.price.toFixed(3)}
+            </p>
           </div>
         </div>
-        
-        <div className="mt-3 flex items-center gap-2">
-          {isRecommended && (
-            <Badge className="bg-green-500">推荐持有</Badge>
-          )}
-          {isWarning && (
-            <Badge variant="destructive">
-              <AlertTriangle className="h-3 w-3 mr-1" />
-              {etf.status}
-            </Badge>
-          )}
-          {!isRecommended && !isWarning && (
-            <Badge variant="outline">{etf.status}</Badge>
-          )}
-        </div>
-        
-        {isRecommended && (
-          <div className="mt-3 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-            <p className="text-sm font-medium text-green-700 dark:text-green-400">
+
+        {/* 状态标签 */}
+        <div className="flex items-center gap-2">
+          {isRecommended ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500 text-white rounded-full text-xs font-medium">
+              <Zap className="w-3 h-3" />
               当前最优选择
-            </p>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+            </div>
+          ) : isWarning ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-white rounded-full text-xs font-medium">
+              <AlertTriangle className="w-3 h-3" />
+              {etf.status}
+            </div>
+          ) : (
+            <div className="px-3 py-1.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-full text-xs">
+              {etf.status}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
 // 超跌策略卡片
 function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
   const isNearLower = etf.distanceToLower < 5;
-  
+
+  const rankColors = [
+    'bg-gradient-to-br from-amber-400 to-orange-500 text-white',
+    'bg-gradient-to-br from-slate-300 to-slate-400 text-slate-800',
+    'bg-gradient-to-br from-amber-600 to-amber-700 text-white',
+  ];
+
   return (
-    <Card className={`mb-3 ${isNearLower ? 'border-orange-500 shadow-lg' : ''}`}>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Badge variant={isNearLower ? 'default' : 'secondary'} className={isNearLower ? 'bg-orange-500' : ''}>
+    <div className={`
+      relative overflow-hidden rounded-2xl transition-all duration-300 hover:scale-[1.01] hover:shadow-xl
+      ${isNearLower 
+        ? 'bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/30 border-2 border-orange-200 dark:border-orange-800' 
+        : 'bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700'}
+    `}>
+      {/* 顶部装饰条 */}
+      {isNearLower && (
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-400 via-amber-400 to-yellow-400" />
+      )}
+
+      <div className="p-4">
+        {/* 头部 */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <div className={`
+              w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shadow-lg
+              ${rank <= 3 ? rankColors[rank - 1] : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}
+            `}>
               #{rank}
-            </Badge>
-            <CardTitle className="text-lg">{etf.name}</CardTitle>
-            <span className="text-sm text-muted-foreground">{etf.code}</span>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-lg">{etf.name}</h3>
+                {isNearLower && (
+                  <AlertTriangle className="w-4 h-4 text-orange-500 animate-pulse" />
+                )}
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{etf.code}</p>
+            </div>
           </div>
+
+          {/* 距ENE下轨 */}
           <div className="text-right">
-            <p className="text-sm text-muted-foreground">距ENE下轨</p>
-            <p className={`text-xl font-bold ${isNearLower ? 'text-orange-500' : 'text-gray-600'}`}>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">距ENE下轨</p>
+            <p className={`text-lg font-bold ${isNearLower ? 'text-orange-500' : 'text-slate-600 dark:text-slate-300'}`}>
               {etf.distanceToLower.toFixed(2)}%
             </p>
           </div>
         </div>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <p className="text-sm text-muted-foreground">当前价格</p>
-            <p className="text-2xl font-bold">¥{etf.currentPrice.toFixed(3)}</p>
+
+        {/* 数据指标 */}
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-xs text-slate-500 dark:text-slate-400">当前价格</span>
+              <span className="text-lg font-bold text-slate-700 dark:text-slate-200">
+                ¥{etf.currentPrice.toFixed(3)}
+              </span>
+            </div>
           </div>
-          <div>
-            <p className="text-sm text-muted-foreground">ENE下轨</p>
-            <p className="text-2xl font-bold text-green-600">¥{etf.lowerBand.toFixed(3)}</p>
+          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-xs text-slate-500 dark:text-slate-400">ENE下轨</span>
+              <span className="text-lg font-bold text-emerald-600">
+                ¥{etf.lowerBand.toFixed(3)}
+              </span>
+            </div>
           </div>
-          <div>
-            <p className="text-sm text-muted-foreground">10日均线</p>
-            <p className="text-xl font-semibold">¥{etf.ma10.toFixed(3)}</p>
+          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-xs text-slate-500 dark:text-slate-400">10日均线</span>
+              <span className="font-semibold text-slate-700 dark:text-slate-200">
+                ¥{etf.ma10.toFixed(3)}
+              </span>
+            </div>
           </div>
-          <div>
-            <p className="text-sm text-muted-foreground">日均成交额</p>
-            <p className="text-xl font-semibold">{(etf.avgMoney / 10000).toFixed(0)}万</p>
+          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3">
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-xs text-slate-500 dark:text-slate-400">日均成交</span>
+              <span className="font-semibold text-slate-700 dark:text-slate-200">
+                {(etf.avgMoney / 10000).toFixed(0)}万
+              </span>
+            </div>
           </div>
         </div>
-        
+
+        {/* 提示 */}
         {isNearLower && (
-          <div className="mt-3 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
-            <p className="text-sm font-medium text-orange-700 dark:text-orange-400 flex items-center gap-1">
-              <AlertTriangle className="h-4 w-4" />
+          <div className="flex items-center gap-2 px-3 py-2 bg-orange-100 dark:bg-orange-950/50 rounded-xl">
+            <AlertTriangle className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+            <span className="text-sm font-medium text-orange-700 dark:text-orange-300">
               接近ENE下轨，关注反弹机会
-            </p>
+            </span>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
 function SkeletonCard() {
   return (
-    <Card className="mb-3">
+    <Card className="mb-3 overflow-hidden">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <Skeleton className="h-6 w-40" />
-          <Skeleton className="h-6 w-20" />
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-10 w-10 rounded-xl" />
+            <div>
+              <Skeleton className="h-5 w-32 mb-1" />
+              <Skeleton className="h-3 w-20" />
+            </div>
+          </div>
+          <Skeleton className="h-8 w-20 rounded-full" />
         </div>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 gap-4">
-          <Skeleton className="h-12 w-full" />
-          <Skeleton className="h-12 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          <Skeleton className="h-16 rounded-xl" />
+          <Skeleton className="h-16 rounded-xl" />
+          <Skeleton className="h-16 rounded-xl" />
         </div>
+        <Skeleton className="h-8 w-24 rounded-full" />
       </CardContent>
     </Card>
   );
 }
 
-// ETF配置内容 - 按照小程序版本样式
+// ETF配置内容
 function ConfigDialogContent({
   configs,
   onRefresh,
@@ -246,13 +336,13 @@ function ConfigDialogContent({
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('确定要删除这个ETF配置吗？')) return;
+    if (!confirm('确定要删除这个ETF吗？')) return;
     setLoading(true);
     try {
       await deleteEtfConfig(id);
       onRefresh();
-    } catch (e) {
-      console.error('删除失败', e);
+    } catch (err) {
+      alert('删除失败');
     } finally {
       setLoading(false);
     }
@@ -263,8 +353,8 @@ function ConfigDialogContent({
     try {
       await updateEtfConfig(id, { isActive });
       onRefresh();
-    } catch (e) {
-      console.error('更新失败', e);
+    } catch (err) {
+      alert('更新失败');
     } finally {
       setLoading(false);
     }
@@ -284,8 +374,8 @@ function ConfigDialogContent({
       }
       setShowDialog(false);
       onRefresh();
-    } catch (e) {
-      console.error('操作失败', e);
+    } catch (err) {
+      alert(editingConfig ? '修改失败' : '添加失败');
     } finally {
       setLoading(false);
     }
@@ -293,55 +383,52 @@ function ConfigDialogContent({
 
   return (
     <>
-      <div className="p-4">
-        <div className="mb-4 flex justify-between items-center">
-          <h2 className="text-xl font-bold">ETF配置管理</h2>
-          <Button onClick={handleAdd} size="sm">
-            <Plus className="h-4 w-4 mr-1" />
-            添加ETF
-          </Button>
-        </div>
+      <div className="mb-4 flex justify-end">
+        <Button size="sm" onClick={handleAdd}>
+          <Plus className="h-4 w-4 mr-1" />
+          添加ETF
+        </Button>
+      </div>
 
-        {configs.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">暂无ETF配置</div>
-        ) : (
-          <div className="space-y-3">
-            {configs.map((config) => (
-              <Card key={config.id}>
-                <CardContent className="p-4">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="font-semibold text-lg">{config.name}</span>
-                        <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded">
-                          {config.market.toUpperCase()}
-                        </span>
-                      </div>
-                      <p className="text-sm text-gray-600">代码: {config.code}</p>
+      {configs.length === 0 ? (
+        <div className="text-center py-8 text-slate-500">暂无ETF配置</div>
+      ) : (
+        <div className="space-y-3">
+          {configs.map((config) => (
+            <Card key={config.id}>
+              <CardContent className="p-4">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="font-semibold text-lg">{config.name}</span>
+                      <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded dark:bg-blue-900/50 dark:text-blue-300">
+                        {config.market.toUpperCase()}
+                      </span>
                     </div>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">代码: {config.code}</p>
+                  </div>
 
-                    <div className="flex flex-col items-end gap-2">
-                      <Switch
-                        checked={config.isActive}
-                        onCheckedChange={(checked) => handleToggle(config.id, checked)}
-                        disabled={loading}
-                      />
-                      <div className="flex gap-2 mt-2">
-                        <Button size="sm" variant="outline" onClick={() => handleEdit(config)}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => handleDelete(config.id)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <Switch
+                      checked={config.isActive}
+                      onCheckedChange={(checked) => handleToggle(config.id, checked)}
+                      disabled={loading}
+                    />
+                    <div className="flex gap-2 mt-2">
+                      <Button size="sm" variant="outline" onClick={() => handleEdit(config)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => handleDelete(config.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent>
@@ -452,8 +539,9 @@ export default function ETFRotationPage() {
         setOversoldData(oversold as OversoldResponse);
       }
       setLastUpdate(new Date().toLocaleTimeString('zh-CN'));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '获取数据失败');
+    } catch (err: any) {
+      console.error('获取数据失败:', err);
+      setError(err.message || '获取数据失败');
     } finally {
       setLoading(false);
     }
@@ -463,48 +551,64 @@ export default function ETFRotationPage() {
     try {
       const data = await getEtfConfigs();
       setConfigs(data);
-    } catch (e) {
-      console.error('加载配置失败', e);
+    } catch (err) {
+      console.error('获取配置失败:', err);
     }
   };
 
   useEffect(() => {
     fetchData();
-  }, [currentStrategy]);
-
-  useEffect(() => {
     loadConfigs();
-  }, []);
+  }, [currentStrategy]);
 
   const isOversoldMode = currentStrategy === 'oversold';
   const currentData = isOversoldMode ? oversoldData : rotationData;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-slate-900 dark:via-slate-900 dark:to-indigo-950">
       {/* Header */}
-      <header className="sticky top-0 z-10 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b">
+      <header className="sticky top-0 z-20 backdrop-blur-xl bg-white/70 dark:bg-slate-900/70 border-b border-slate-200/50 dark:border-slate-700/50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold">ETF轮动策略</h1>
-              <p className="text-sm text-muted-foreground">智能轮动 · 趋势追踪</p>
+            <div className="flex items-center gap-3">
+              {/* Logo */}
+              <div className={`
+                w-10 h-10 rounded-xl flex items-center justify-center
+                ${isOversoldMode 
+                  ? 'bg-gradient-to-br from-orange-400 to-amber-500' 
+                  : 'bg-gradient-to-br from-emerald-400 to-teal-500'}
+              `}>
+                {isOversoldMode ? (
+                  <AlertTriangle className="w-5 h-5 text-white" />
+                ) : (
+                  <TrendingUp className="w-5 h-5 text-white" />
+                )}
+              </div>
+              <div>
+                <h1 className="text-xl font-bold bg-gradient-to-r from-slate-800 to-slate-600 dark:from-white dark:to-slate-300 bg-clip-text text-transparent">
+                  ETF轮动策略
+                </h1>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {isOversoldMode ? '超跌反弹 · 危机模式' : '趋势追踪 · 智能轮动'}
+                </p>
+              </div>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               <Select value={currentStrategy} onValueChange={(v) => setCurrentStrategy(v as StrategyType)}>
-                <SelectTrigger className="w-[120px]">
+                <SelectTrigger className="w-[110px] h-9 bg-slate-100 dark:bg-slate-800 border-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="rotation">
                     <div className="flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4" />
+                      <TrendingUp className="h-4 w-4 text-emerald-500" />
                       趋势轮动
                     </div>
                   </SelectItem>
                   <SelectItem value="oversold">
                     <div className="flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4" />
+                      <AlertTriangle className="h-4 w-4 text-orange-500" />
                       超跌策略
                     </div>
                   </SelectItem>
@@ -513,17 +617,22 @@ export default function ETFRotationPage() {
 
               <button
                 onClick={() => setShowConfig(true)}
-                className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                title="ETF配置"
               >
-                <Settings className="h-5 w-5" />
+                <Settings className="h-5 w-5 text-slate-600 dark:text-slate-400" />
               </button>
 
               <button
                 onClick={fetchData}
                 disabled={loading}
-                className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                className={`
+                  p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors
+                  ${loading ? 'opacity-50' : ''}
+                `}
+                title="刷新数据"
               >
-                <RefreshCw className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`h-5 w-5 text-slate-600 dark:text-slate-400 ${loading ? 'animate-spin' : ''}`} />
               </button>
             </div>
           </div>
@@ -531,59 +640,107 @@ export default function ETFRotationPage() {
       </header>
 
       <main className="container mx-auto px-4 py-6">
-        {/* Info Banner */}
-        <Card className="mb-6 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
-          <CardContent className="py-3 flex items-center gap-2">
-            <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
-            <p className="text-sm text-blue-700 dark:text-blue-400">
-              {isOversoldMode 
-                ? '基于ENE布林下轨策略，寻找超跌反弹机会' 
-                : '基于25日动量得分筛选，R²稳定性加权，配合3%跌幅风控拦截'}
-            </p>
+        {/* 策略说明 Banner */}
+        <Card className={`
+          mb-6 overflow-hidden border-0 shadow-lg
+          ${isOversoldMode 
+            ? 'bg-gradient-to-r from-orange-500 to-amber-500' 
+            : 'bg-gradient-to-r from-emerald-500 to-teal-500'}
+        `}>
+          <CardContent className="py-3 px-4 flex items-center justify-between">
+            <div className="flex items-center gap-3 text-white">
+              <Info className="h-5 w-5 opacity-90" />
+              <p className="text-sm font-medium">
+                {isOversoldMode 
+                  ? '基于ENE布林下轨策略，寻找超跌反弹机会' 
+                  : '基于25日动量得分筛选，R²稳定性加权，配合3%跌幅风控拦截'}
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 text-white/80 text-xs">
+              <Clock className="h-3 w-3" />
+              <span>{lastUpdate}</span>
+            </div>
           </CardContent>
         </Card>
 
         {/* Content */}
         {loading && !currentData ? (
-          <div className="space-y-3">
-            {[1, 2, 3, 4, 5].map((i) => <SkeletonCard key={i} />)}
+          <div className="space-y-4">
+            {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
           </div>
         ) : error ? (
-          <Card className="p-6 text-center">
-            <p className="text-red-500 mb-4">{error}</p>
-            <button
-              onClick={fetchData}
-              className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90"
-            >
-              重试
-            </button>
+          <Card className="p-8 text-center border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center">
+              <AlertTriangle className="w-8 h-8 text-red-500" />
+            </div>
+            <p className="text-red-600 dark:text-red-400 mb-4 font-medium">{error}</p>
+            <Button onClick={fetchData} variant="outline" className="border-red-200 dark:border-red-800">
+              重新加载
+            </Button>
           </Card>
         ) : (
           <>
-            {/* Summary Card */}
-            <Card className={`mb-6 text-white ${isOversoldMode ? 'bg-gradient-to-r from-orange-500 to-amber-600' : 'bg-gradient-to-r from-green-500 to-emerald-600'}`}>
-              <CardContent className="py-4">
+            {/* 汇总卡片 */}
+            <Card className={`
+              mb-6 text-white border-0 shadow-xl overflow-hidden
+              ${isOversoldMode 
+                ? 'bg-gradient-to-br from-orange-600 via-amber-600 to-orange-500' 
+                : 'bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-500'}
+            `}>
+              {/* 装饰背景 */}
+              <div className="absolute inset-0 opacity-10">
+                <div className="absolute -top-24 -right-24 w-64 h-64 bg-white rounded-full blur-3xl" />
+                <div className="absolute -bottom-32 -left-32 w-80 h-80 bg-white rounded-full blur-3xl" />
+              </div>
+              
+              <CardContent className="py-6 relative">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm opacity-90">
-                      {isOversoldMode ? 'ENE下轨Top10' : '当前推荐'}
+                    <p className="text-sm opacity-90 mb-1">
+                      {isOversoldMode ? 'ENE下轨标的' : '当前推荐'}
                     </p>
-                    <p className="text-2xl font-bold">
+                    <p className="text-3xl font-bold">
                       {isOversoldMode 
                         ? `${currentData?.data.etfs.length || 0} 只` 
                         : (rotationData?.data.summary.topPick || '暂无')}
                     </p>
+                    {!isOversoldMode && rotationData && (
+                      <p className="text-sm opacity-75 mt-1">
+                        共 {rotationData.data.summary.total} 只 | 推荐 {rotationData.data.summary.recommended} 只
+                      </p>
+                    )}
                   </div>
                   <div className="text-right">
-                    <p className="text-sm opacity-90">更新时间</p>
-                    <p className="text-sm">{lastUpdate}</p>
+                    {isOversoldMode ? (
+                      <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center">
+                        <AlertTriangle className="w-7 h-7" />
+                      </div>
+                    ) : (
+                      <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center">
+                        <Sparkles className="w-7 h-7" />
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* ETF List */}
-            <div className="space-y-3">
+            {/* ETF 列表 */}
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
+                {isOversoldMode ? (
+                  <>
+                    <AlertTriangle className="w-5 h-5 text-orange-500" />
+                    超跌标的
+                  </>
+                ) : (
+                  <>
+                    <TrendingUp className="w-5 h-5 text-emerald-500" />
+                    趋势排名
+                  </>
+                )}
+              </h2>
+              
               {isOversoldMode ? (
                 (oversoldData?.data.etfs || []).map((etf, index) => (
                   <OversoldCard key={etf.code} etf={etf} rank={index + 1} />
@@ -598,9 +755,12 @@ export default function ETFRotationPage() {
         )}
 
         {/* Footer */}
-        <div className="mt-8 text-center text-sm text-muted-foreground">
-          <p>数据仅供参考，不构成投资建议</p>
-          <p className="mt-1">市场有风险，投资需谨慎</p>
+        <div className="mt-10 text-center">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-100 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 text-sm">
+            <span>数据仅供参考，不构成投资建议</span>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <span>市场有风险，投资需谨慎</span>
+          </div>
         </div>
       </main>
 
@@ -608,7 +768,10 @@ export default function ETFRotationPage() {
       <Dialog open={showConfig} onOpenChange={setShowConfig}>
         <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>ETF配置管理</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Settings className="w-5 h-5" />
+              ETF配置管理
+            </DialogTitle>
           </DialogHeader>
           <ConfigDialogContent
             configs={configs}

@@ -31,9 +31,37 @@ export interface StrategyResponse {
   message: string;
 }
 
-async function fetchAPI<T>(endpoint: string): Promise<T> {
+// 超跌策略ETF数据
+export interface OversoldETF {
+  code: string;
+  name: string;
+  currentPrice: number;
+  ma10: number;
+  lowerBand: number;
+  distanceToLower: number;
+  avgMoney: number;
+}
+
+export interface OversoldResponse {
+  code: number;
+  data: {
+    etfs: OversoldETF[];
+    recommend: string[];
+    timestamp: string;
+    dataSource: string;
+    summary: string;
+  };
+  message: string;
+}
+
+async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const res = await fetch(endpoint, {
-    next: { revalidate: 60 }, // Revalidate every 60 seconds
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+    next: { revalidate: 60 },
   });
   
   if (!res.ok) {
@@ -47,8 +75,8 @@ export function getETFStrategy(): Promise<StrategyResponse> {
   return fetchAPI<StrategyResponse>('/api/strategy/etf-rotation');
 }
 
-export function getOversoldStrategy(): Promise<StrategyResponse> {
-  return fetchAPI<StrategyResponse>('/api/strategy/oversold');
+export function getOversoldStrategy(): Promise<OversoldResponse> {
+  return fetchAPI<OversoldResponse>('/api/strategy/oversold');
 }
 
 // ETF配置相关API
@@ -79,7 +107,7 @@ export async function updateEtfConfig(id: number, data: { code?: string; name?: 
 }
 
 export async function deleteEtfConfig(id: number): Promise<void> {
-  return fetchAPI<void>(`/api/etf-config/${id}`, {
+  await fetchAPI<void>(`/api/etf-config/${id}`, {
     method: 'DELETE',
   });
 }
