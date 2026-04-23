@@ -210,15 +210,11 @@ function SkeletonCard() {
   );
 }
 
-// ETF配置弹窗 - 按照小程序版本样式
-function ConfigDialog({
-  open,
-  onOpenChange,
+// ETF配置内容 - 按照小程序版本样式
+function ConfigDialogContent({
   configs,
   onRefresh,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   configs: EtfConfig[];
   onRefresh: () => void;
 }) {
@@ -611,9 +607,10 @@ export default function ETFRotationPage() {
       {/* 配置弹窗 */}
       <Dialog open={showConfig} onOpenChange={setShowConfig}>
         <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
-          <ConfigDialog
-            open={showConfig}
-            onOpenChange={setShowConfig}
+          <DialogHeader>
+            <DialogTitle>ETF配置管理</DialogTitle>
+          </DialogHeader>
+          <ConfigDialogContent
             configs={configs}
             onRefresh={() => {
               loadConfigs();
