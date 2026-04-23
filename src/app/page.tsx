@@ -98,15 +98,9 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
             <p className="text-sm text-muted-foreground">稳定性 R²</p>
             <p className="text-2xl font-bold">{etf.rSquared.toFixed(3)}</p>
           </div>
-          <div>
+          <div className="col-span-2">
             <p className="text-sm text-muted-foreground">当前价格</p>
             <p className="text-xl font-semibold">¥{etf.price.toFixed(3)}</p>
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">年化收益</p>
-            <p className={`text-xl font-semibold ${(etf.annualReturn || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {((etf.annualReturn || 0) * 100).toFixed(2)}%
-            </p>
           </div>
         </div>
         
