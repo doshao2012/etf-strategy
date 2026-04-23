@@ -221,13 +221,14 @@ export default function ETFRotationPage() {
     setError(null);
     
     try {
-      const [rotation, oversold] = await Promise.all([
-        getETFStrategy(),
-        getOversoldStrategy(),
-      ]);
-      
-      setRotationData(rotation as RotationResponse);
-      setOversoldData(oversold as OversoldResponse);
+      // 只请求当前选择的策略数据
+      if (currentStrategy === 'rotation') {
+        const rotation = await getETFStrategy();
+        setRotationData(rotation as RotationResponse);
+      } else {
+        const oversold = await getOversoldStrategy();
+        setOversoldData(oversold as OversoldResponse);
+      }
       setLastUpdate(new Date().toLocaleTimeString('zh-CN'));
     } catch (err) {
       setError(err instanceof Error ? err.message : '获取数据失败');
@@ -236,11 +237,16 @@ export default function ETFRotationPage() {
     }
   };
 
+  // 切换策略时重新获取数据
   useEffect(() => {
     fetchData();
+  }, [currentStrategy]);
+
+  // 每分钟刷新当前策略
+  useEffect(() => {
     const interval = setInterval(fetchData, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [currentStrategy]);
 
   const isOversoldMode = currentStrategy === 'oversold';
   const currentData = isOversoldMode ? oversoldData : rotationData;
