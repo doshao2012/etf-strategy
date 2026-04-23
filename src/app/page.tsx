@@ -121,8 +121,8 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
 
         {/* 今日涨跌幅 */}
         <div className="flex items-center justify-between">
-          <span className="text-sm text-slate-500">今日涨跌幅</span>
-          <span className={`text-base font-medium ${etf.todayChange >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+          <span className="text-sm font-medium text-slate-700">今日涨跌幅</span>
+          <span className={`text-base font-bold ${etf.todayChange >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
             {etf.todayChange >= 0 ? '+' : ''}{etf.todayChange}%
           </span>
         </div>
@@ -539,6 +539,26 @@ export default function ETFRotationPage() {
           </Card>
         ) : (
           <>
+            {/* 汇总信息 */}
+            <Card className="mb-4 bg-white border border-slate-200 shadow-sm">
+              <CardContent className="p-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-5 h-5 text-emerald-500" />
+                  <span className="text-sm font-medium text-slate-700">
+                    建议持仓
+                  </span>
+                  <span className="text-sm font-bold text-emerald-600">
+                    {isOversoldMode 
+                      ? (oversoldData?.data.recommend?.[0] || '暂无')
+                      : (rotationData?.data.summary.topPick || '暂无')}
+                  </span>
+                </div>
+                <span className="text-xs text-slate-400">
+                  更新时间: {lastUpdate}
+                </span>
+              </CardContent>
+            </Card>
+
             {/* ETF 列表 */}
             <div>
               <h2 className="text-sm font-medium text-slate-500 mb-3">
