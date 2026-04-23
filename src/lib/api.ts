@@ -50,3 +50,36 @@ export function getETFStrategy(): Promise<StrategyResponse> {
 export function getOversoldStrategy(): Promise<StrategyResponse> {
   return fetchAPI<StrategyResponse>('/api/strategy/oversold');
 }
+
+// ETF配置相关API
+export interface EtfConfig {
+  id: number;
+  code: string;
+  name: string;
+  market: string;
+  isActive: boolean;
+}
+
+export async function getEtfConfigs(): Promise<EtfConfig[]> {
+  return fetchAPI<EtfConfig[]>('/api/etf-config');
+}
+
+export async function createEtfConfig(data: { code: string; name: string; market: string }): Promise<EtfConfig> {
+  return fetchAPI<EtfConfig>('/api/etf-config', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateEtfConfig(id: number, data: { code?: string; name?: string; market?: string; isActive?: boolean }): Promise<EtfConfig> {
+  return fetchAPI<EtfConfig>(`/api/etf-config/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteEtfConfig(id: number): Promise<void> {
+  return fetchAPI<void>(`/api/etf-config/${id}`, {
+    method: 'DELETE',
+  });
+}

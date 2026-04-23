@@ -1,12 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getETFStrategy, getOversoldStrategy } from '@/lib/api';
+import { getETFStrategy, getOversoldStrategy, getEtfConfigs, updateEtfConfig, createEtfConfig, deleteEtfConfig, type EtfConfig } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Info } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Info, Settings, Plus, Trash2, X } from 'lucide-react';
 
 type StrategyType = 'rotation' | 'oversold';
 
@@ -208,20 +212,150 @@ function SkeletonCard() {
   );
 }
 
+// ETF配置弹窗
+function ConfigDialog({
+  open,
+  onOpenChange,
+  configs,
+  onRefresh,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  configs: EtfConfig[];
+  onRefresh: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [formData, setFormData] = useState({ code: '', name: '', market: 'sz' });
+
+  const handleToggle = async (id: number, isActive: boolean) => {
+    setLoading(true);
+    try {
+      await updateEtfConfig(id, { isActive });
+      onRefresh();
+    } catch (e) {
+      console.error('更新失败', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('确定要删除吗？')) return;
+    setLoading(true);
+    try {
+      await deleteEtfConfig(id);
+      onRefresh();
+    } catch (e) {
+      console.error('删除失败', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAdd = async () => {
+    if (!formData.code || !formData.name) return;
+    setLoading(true);
+    try {
+      await createEtfConfig(formData);
+      setFormData({ code: '', name: '', market: 'sz' });
+      setShowAddForm(false);
+      onRefresh();
+    } catch (e) {
+      console.error('添加失败', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>ETF配置</DialogTitle>
+        </DialogHeader>
+        
+        <div className="space-y-3">
+          {/* 添加按钮 */}
+          {!showAddForm && (
+            <Button variant="outline" className="w-full" onClick={() => setShowAddForm(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              添加ETF
+            </Button>
+          )}
+
+          {/* 添加表单 */}
+          {showAddForm && (
+            <Card className="p-3">
+              <div className="space-y-2">
+                <Input
+                  placeholder="ETF代码，如 159915"
+                  value={formData.code}
+                  onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                />
+                <Input
+                  placeholder="ETF名称，如 创业板ETF"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                />
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={handleAdd} disabled={loading}>
+                    确定
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setShowAddForm(false)}>
+                    取消
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* 配置列表 */}
+          {configs.map((config) => (
+            <Card key={config.id} className="p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium">{config.name}</p>
+                  <p className="text-sm text-muted-foreground">{config.code}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={config.isActive}
+                    onCheckedChange={(checked) => handleToggle(config.id, checked)}
+                    disabled={loading}
+                  />
+                  <button
+                    onClick={() => handleDelete(config.id)}
+                    className="p-1 text-red-500 hover:bg-red-50 rounded"
+                    disabled={loading}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function ETFRotationPage() {
   const [rotationData, setRotationData] = useState<RotationResponse | null>(null);
   const [oversoldData, setOversoldData] = useState<OversoldResponse | null>(null);
+  const [configs, setConfigs] = useState<EtfConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [currentStrategy, setCurrentStrategy] = useState<StrategyType>('rotation');
+  const [showConfig, setShowConfig] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
     setError(null);
     
     try {
-      // 只请求当前选择的策略数据
       if (currentStrategy === 'rotation') {
         const rotation = await getETFStrategy();
         setRotationData(rotation as RotationResponse);
@@ -237,16 +371,22 @@ export default function ETFRotationPage() {
     }
   };
 
-  // 切换策略时重新获取数据
+  const loadConfigs = async () => {
+    try {
+      const data = await getEtfConfigs();
+      setConfigs(data);
+    } catch (e) {
+      console.error('加载配置失败', e);
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, [currentStrategy]);
 
-  // 每分钟刷新当前策略
   useEffect(() => {
-    const interval = setInterval(fetchData, 60000);
-    return () => clearInterval(interval);
-  }, [currentStrategy]);
+    loadConfigs();
+  }, []);
 
   const isOversoldMode = currentStrategy === 'oversold';
   const currentData = isOversoldMode ? oversoldData : rotationData;
@@ -262,9 +402,9 @@ export default function ETFRotationPage() {
               <p className="text-sm text-muted-foreground">智能轮动 · 趋势追踪</p>
             </div>
             
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <Select value={currentStrategy} onValueChange={(v) => setCurrentStrategy(v as StrategyType)}>
-                <SelectTrigger className="w-[140px]">
+                <SelectTrigger className="w-[120px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -282,6 +422,14 @@ export default function ETFRotationPage() {
                   </SelectItem>
                 </SelectContent>
               </Select>
+
+              {/* 设置按钮 */}
+              <button
+                onClick={() => setShowConfig(true)}
+                className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <Settings className="h-5 w-5" />
+              </button>
 
               <button
                 onClick={fetchData}
@@ -368,6 +516,17 @@ export default function ETFRotationPage() {
           <p className="mt-1">市场有风险，投资需谨慎</p>
         </div>
       </main>
+
+      {/* 配置弹窗 */}
+      <ConfigDialog
+        open={showConfig}
+        onOpenChange={setShowConfig}
+        configs={configs}
+        onRefresh={() => {
+          loadConfigs();
+          fetchData();
+        }}
+      />
     </div>
   );
 }
