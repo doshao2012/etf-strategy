@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-从数据库读取ETF配置
+获取单个ETF配置
 """
 import sqlite3
 import json
@@ -9,8 +9,8 @@ import sys
 
 DB_PATH = '/workspace/projects/server/database.sqlite'
 
-def get_etf_configs():
-    """从数据库读取所有ETF配置"""
+def get_etf_config(id):
+    """获取单个ETF配置"""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -18,25 +18,29 @@ def get_etf_configs():
         cursor.execute('''
             SELECT id, code, market, name, isActive
             FROM etf_config
-            ORDER BY createdAt ASC
-        ''')
+            WHERE id = ?
+        ''', (int(id),))
 
-        configs = []
-        for row in cursor.fetchall():
-            configs.append({
+        row = cursor.fetchone()
+        conn.close()
+
+        if row:
+            return {
                 'id': row[0],
                 'code': row[1],
                 'market': row[2],
                 'name': row[3],
-                'isActive': bool(row[4]),
-            })
-
-        conn.close()
-        return configs
+                'isActive': bool(row[4])
+            }
+        return None
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
-        return []
+        return None
 
 if __name__ == '__main__':
-    configs = get_etf_configs()
-    print(json.dumps(configs, ensure_ascii=False))
+    id = sys.argv[1] if len(sys.argv) > 1 else ''
+    result = get_etf_config(id)
+    if result:
+        print(json.dumps(result, ensure_ascii=False))
+    else:
+        print(json.dumps({'message': '配置不存在'}, ensure_ascii=False))

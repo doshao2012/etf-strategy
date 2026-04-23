@@ -5,6 +5,7 @@ export interface ETFMetrics {
   code: string;
   name: string;
   score: number;
+  estimatedScore?: number;
   rSquared: number;
   price: number;
   todayChange: number;
