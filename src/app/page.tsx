@@ -70,7 +70,7 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
   const isWarning = etf.status.includes('拦截') || etf.status.includes('过低');
 
   return (
-    <Card className="mb-3 bg-white border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+    <Card className={`mb-3 bg-white border ${isWarning ? 'border-red-400 bg-red-50' : 'border-slate-200'} shadow-sm hover:shadow-md transition-shadow`}>
       <CardContent className="p-4">
         {/* 顶部：序号、名称、代码、状态 */}
         <div className="flex items-center justify-between mb-4">
@@ -100,7 +100,7 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
           <div className="bg-emerald-50 rounded-lg p-3 text-center">
             <p className="text-xs text-slate-500 mb-1">动量得分</p>
             <p className={`text-xl font-bold ${etf.score >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-              {etf.score >= 0 ? '+' : ''}{etf.score.toFixed(4)}
+              {etf.score.toFixed(4)}
             </p>
           </div>
           {/* 稳定性 R² */}
@@ -114,7 +114,7 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
           <div className="bg-orange-50 rounded-lg p-3 text-center">
             <p className="text-xs text-slate-500 mb-1">当前价格</p>
             <p className="text-xl font-bold text-orange-500">
-              ¥{etf.price.toFixed(3)}
+              {etf.price.toFixed(3)}
             </p>
           </div>
         </div>
@@ -122,7 +122,7 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
         {/* 今日涨跌幅 */}
         <div className="flex items-center justify-between">
           <span className="text-sm text-slate-500">今日涨跌幅</span>
-          <span className={`text-base font-medium ${etf.todayChange >= 0 ? 'text-red-500' : 'text-slate-600'}`}>
+          <span className={`text-base font-medium ${etf.todayChange >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
             {etf.todayChange >= 0 ? '+' : ''}{etf.todayChange}%
           </span>
         </div>
@@ -164,11 +164,11 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
         <div className="grid grid-cols-2 gap-2 mb-3">
           <div className="bg-orange-50 rounded-lg p-3">
             <p className="text-xs text-slate-500 mb-1">当前价格</p>
-            <p className="text-xl font-bold text-orange-500">¥{etf.currentPrice.toFixed(3)}</p>
+            <p className="text-xl font-bold text-orange-500">{etf.currentPrice.toFixed(3)}</p>
           </div>
           <div className="bg-emerald-50 rounded-lg p-3">
             <p className="text-xs text-slate-500 mb-1">ENE下轨</p>
-            <p className="text-xl font-bold text-emerald-600">¥{etf.lowerBand.toFixed(3)}</p>
+            <p className="text-xl font-bold text-emerald-600">{etf.lowerBand.toFixed(3)}</p>
           </div>
         </div>
 
@@ -176,7 +176,7 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-slate-50 rounded-lg p-3">
             <p className="text-xs text-slate-500 mb-1">10日均线</p>
-            <p className="text-base font-semibold text-slate-700">¥{etf.ma10.toFixed(3)}</p>
+            <p className="text-base font-semibold text-slate-700">{etf.ma10.toFixed(3)}</p>
           </div>
           <div className="bg-slate-50 rounded-lg p-3">
             <p className="text-xs text-slate-500 mb-1">距ENE下轨</p>
