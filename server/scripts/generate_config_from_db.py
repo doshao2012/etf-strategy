@@ -8,7 +8,7 @@ import json
 import sys
 from datetime import datetime
 
-DB_PATH = '/workspace/projects/database.sqlite'
+DB_PATH = '/workspace/projects//workspace/projects/server/database.sqlite'
 OUTPUT_PATH = '/workspace/projects/server/src/modules/strategy/etf-real-data.config.ts'
 
 def fetch_etf_configs():
