@@ -6,7 +6,7 @@ COZE_WORKSPACE_PATH="${COZE_WORKSPACE_PATH:-$(pwd)}"
 PORT=5000
 DEPLOY_RUN_PORT="${DEPLOY_RUN_PORT:-$PORT}"
 
-# 使用 fuser 清理端口（比 lsof 更可靠）
+# 使用 fuser 清理端口（psmisc 包提供）
 cleanup_port() {
     local port=$1
     echo "Checking port $port..."
