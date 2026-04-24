@@ -254,11 +254,11 @@ function ConfigDialogContent({
     setShowDialog(true);
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (code: string) => {
     if (!confirm('确定要删除这个ETF吗？')) return;
     setLoading(true);
     try {
-      await deleteEtfConfig(id);
+      await deleteEtfConfig(code);
       onRefresh();
     } catch (err) {
       alert('删除失败');
@@ -267,10 +267,10 @@ function ConfigDialogContent({
     }
   };
 
-  const handleToggle = async (id: number, isActive: boolean) => {
+  const handleToggle = async (code: string, isActive: boolean) => {
     setLoading(true);
     try {
-      await updateEtfConfig(id, { isActive });
+      await updateEtfConfig(code, { isActive });
       onRefresh();
     } catch (err) {
       alert('更新失败');
@@ -314,7 +314,7 @@ function ConfigDialogContent({
       ) : (
         <div className="space-y-3">
           {configs.map((config) => (
-            <Card key={config.id}>
+            <Card key={config.code}>
               <CardContent className="p-4">
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
@@ -330,14 +330,14 @@ function ConfigDialogContent({
                   <div className="flex flex-col items-end gap-2">
                     <Switch
                       checked={config.isActive}
-                      onCheckedChange={(checked) => handleToggle(config.id, checked)}
+                      onCheckedChange={(checked) => handleToggle(config.code, checked)}
                       disabled={loading}
                     />
                     <div className="flex gap-2 mt-2">
                       <Button size="sm" variant="outline" onClick={() => handleEdit(config)}>
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => handleDelete(config.id)}>
+                      <Button size="sm" variant="outline" onClick={() => handleDelete(config.code)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>

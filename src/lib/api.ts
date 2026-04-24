@@ -100,15 +100,15 @@ export async function createEtfConfig(data: { code: string; name: string; market
   });
 }
 
-export async function updateEtfConfig(id: number, data: { code?: string; name?: string; market?: string; isActive?: boolean }): Promise<EtfConfig> {
-  return fetchAPI<EtfConfig>(`/api/etf-config/${id}`, {
+export async function updateEtfConfig(code: string, data: { code?: string; name?: string; market?: string; isActive?: boolean }): Promise<EtfConfig> {
+  return fetchAPI<EtfConfig>(`/api/etf-config/${code}`, {
     method: 'PATCH',
     body: JSON.stringify(data),
   });
 }
 
-export async function deleteEtfConfig(id: number): Promise<void> {
-  await fetchAPI<void>(`/api/etf-config/${id}`, {
+export async function deleteEtfConfig(code: string): Promise<void> {
+  await fetchAPI<void>(`/api/etf-config/${code}`, {
     method: 'DELETE',
   });
 }

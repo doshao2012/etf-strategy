@@ -6,12 +6,12 @@ const execAsync = promisify(exec);
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ code: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { code } = await params;
     const scriptPath = '/workspace/projects/server/scripts/get_etf_config.py';
-    const { stdout } = await execAsync(`python3 ${scriptPath} ${id}`);
+    const { stdout } = await execAsync(`python3 ${scriptPath} "${code}"`);
 
     const config = JSON.parse(stdout);
     if (!config) {
@@ -33,15 +33,15 @@ export async function GET(
 // PATCH - 更新ETF配置
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ code: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { code } = await params;
     const body = await request.json();
 
     const scriptPath = '/workspace/projects/server/scripts/update_etf_config.py';
     const args = [
-      id,
+      `"${code}"`,
       body.code ? `"${body.code}"` : 'null',
       body.name ? `"${body.name}"` : 'null',
       body.market ? `"${body.market}"` : 'null',
@@ -64,12 +64,12 @@ export async function PATCH(
 // DELETE - 删除ETF配置
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ code: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { code } = await params;
     const scriptPath = '/workspace/projects/server/scripts/delete_etf_config.py';
-    const { stdout } = await execAsync(`python3 ${scriptPath} ${id}`);
+    const { stdout } = await execAsync(`python3 ${scriptPath} "${code}"`);
 
     const result = JSON.parse(stdout);
     return NextResponse.json(result);
