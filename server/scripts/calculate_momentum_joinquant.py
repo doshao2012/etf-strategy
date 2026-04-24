@@ -99,20 +99,24 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         today_pct = (current_price / last_close - 1) * 100  # 今日涨跌幅
 
         # 2. 动量得分 & 稳定性计算 (线性加权回归)
-        # 使用全部26个数据点进行动量计算
-        y = np.log(prices)
-        x = np.arange(len(y))
-        weights = np.linspace(1, 2, len(y))
-        slope, intercept = np.polyfit(x, y, 1, w=weights)
-
-        # R² 稳定性
-        ss_res = np.sum(weights * (y - (slope * x + intercept)) ** 2)
-        ss_tot = np.sum(weights * (y - np.mean(y)) ** 2)
-        r_squared = 1 - ss_res / ss_tot if ss_tot else 0
-
-        # 综合得分 = 年化(slope*250转指数) * R²
-        ann_return = math.exp(slope * 250) - 1
-        score = ann_return * r_squared
+        def calculate_momentum(price_data):
+            """计算动量得分，复用原始策略公式"""
+            y = np.log(price_data)
+            x = np.arange(len(y))
+            weights = np.linspace(1, 2, len(y))
+            slope, intercept = np.polyfit(x, y, 1, w=weights)
+            
+            # R² 稳定性
+            ss_res = np.sum(weights * (y - (slope * x + intercept)) ** 2)
+            ss_tot = np.sum(weights * (y - np.mean(y)) ** 2)
+            r_squared = 1 - ss_res / ss_tot if ss_tot else 0
+            
+            # 综合得分 = 年化(slope*250转指数) * R²
+            ann_return = math.exp(slope * 250) - 1
+            score = ann_return * r_squared
+            return score, r_squared, ann_return, slope
+        
+        score, r_squared, ann_return, slope = calculate_momentum(prices)
 
         # 3. 状态判定
         status = "正常"
@@ -127,17 +131,7 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         # 4. 预估动量得分
         # 假设明天价格不变，去掉最老的价格，加上当前价格，重新计算
         estimated_prices = np.append(prices[1:], current_price)
-        y_est = np.log(estimated_prices)
-        x_est = np.arange(len(y_est))
-        weights_est = np.linspace(1, 2, len(y_est))
-        slope_est, _ = np.polyfit(x_est, y_est, 1, w=weights_est)
-        
-        ss_res_est = np.sum(weights_est * (y_est - (slope_est * x_est + np.mean(y_est))) ** 2)
-        ss_tot_est = np.sum(weights_est * (y_est - np.mean(y_est)) ** 2)
-        r_squared_est = 1 - ss_res_est / ss_tot_est if ss_tot_est else 0
-        
-        ann_return_est = math.exp(slope_est * 250) - 1
-        estimated_score = ann_return_est * r_squared_est
+        estimated_score, _, _, _ = calculate_momentum(estimated_prices)
 
         return {
             'code': etf_info['code'],
@@ -176,11 +170,11 @@ def main():
     # 按得分排序
     results.sort(key=lambda x: x['score'], reverse=True)
 
-    # 找出得分最高的ETF
+    # 找出得分最高的ETF（返回完整对象，包含预估得分）
     recommend = None
     valid_etfs = [r for r in results if r['score'] >= score_threshold]
     if valid_etfs:
-        recommend = valid_etfs[0]['code']
+        recommend = valid_etfs[0]
 
     # 输出结果
     output = {

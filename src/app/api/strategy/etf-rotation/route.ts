@@ -41,22 +41,25 @@ export async function GET() {
       annualReturn: etf.ann_return,
     }));
 
-    const recommended = validResults
-      .filter((r: any) => r.score >= CONFIG.scoreThreshold && r.status === '正常')
-      .map((r: any) => r.name);
+    // 推荐标的（返回完整对象包含预估得分）
+    const recommendData = pythonResult.data.recommend;
 
     return NextResponse.json({
       code: 200,
       data: {
         etfs: validResults,
-        recommend: recommended,
-        recommendCode: pythonResult.data.recommend,
+        recommend: {
+          name: recommendData?.name || null,
+          code: recommendData?.code || null,
+          score: recommendData?.score || null,
+          estimatedScore: recommendData?.estimated_score || null,
+        },
         timestamp: new Date().toISOString(),
         dataSource: '用户配置的真实数据（Python脚本计算）',
         summary: {
           total: pythonResult.data.summary.total,
           recommended: pythonResult.data.summary.valid,
-          topPick: recommended[0] || null,
+          topPick: recommendData?.name || null,
         },
       },
       message: 'success',
