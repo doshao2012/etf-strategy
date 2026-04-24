@@ -29,6 +29,13 @@ kill_port_if_listening() {
 
 echo "Clearing port ${PORT} before start."
 kill_port_if_listening
+
+# 启动 FastAPI 后端（端口 3000）
+echo "Starting FastAPI backend on port 3000..."
+cd server
+nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 3000 > /app/work/logs/bypass/fastapi.log 2>&1 &
+cd ..
+
 echo "Starting HTTP service on port ${PORT} for dev..."
 
 PORT=$PORT pnpm tsx watch src/server.ts

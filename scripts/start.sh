@@ -9,6 +9,13 @@ DEPLOY_RUN_PORT="${DEPLOY_RUN_PORT:-$PORT}"
 
 start_service() {
     cd "${COZE_WORKSPACE_PATH}"
+    
+    # 启动 FastAPI 后端（端口 3000）
+    echo "Starting FastAPI backend on port 3000..."
+    cd server
+    nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 3000 > /app/work/logs/bypass/fastapi.log 2>&1 &
+    cd ..
+    
     echo "Starting HTTP service on port ${DEPLOY_RUN_PORT} for deploy..."
     PORT=${DEPLOY_RUN_PORT} node dist/server.js
 }
