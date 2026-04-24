@@ -4,11 +4,14 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
+// API 基础 URL - 从环境变量读取
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+
 // GET - 获取所有ETF配置
 export async function GET() {
   try {
     // 调用 FastAPI 后端服务
-    const response = await fetch('http://localhost:3000/api/etf-config');
+    const response = await fetch(`${API_BASE_URL}/api/etf-config`);
     if (!response.ok) {
       throw new Error('获取ETF配置失败');
     }

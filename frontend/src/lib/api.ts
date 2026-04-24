@@ -1,5 +1,8 @@
 // ETF Rotation API Client
-// Uses relative paths - requests are proxied through the Next.js server
+// Uses environment variable for API base URL
+
+// API 基础 URL - 从环境变量读取，或使用相对路径
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
 export interface ETFMetrics {
   code: string;
@@ -56,7 +59,8 @@ export interface OversoldResponse {
 }
 
 async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(endpoint, {
+  const url = API_BASE_URL ? `${API_BASE_URL}${endpoint}` : endpoint;
+  const res = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

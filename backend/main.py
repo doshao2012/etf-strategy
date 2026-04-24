@@ -89,6 +89,63 @@ def delete_etf_config(id: int):
     return None
 
 
+# ============== ETF 策略接口 ==============
+
+@app.get("/api/strategy/etf-rotation")
+def get_etf_rotation_strategy():
+    """获取 ETF 轮动策略"""
+    import subprocess
+    import json
+    
+    try:
+        # 获取最新市场数据
+        fetch_script = os.path.join(os.path.dirname(__file__), "scripts", "fetch_market_data_from_db.py")
+        subprocess.run(["python3", fetch_script], capture_output=True, timeout=60)
+        
+        # 计算动量得分
+        calc_script = os.path.join(os.path.dirname(__file__), "scripts", "calculate_momentum_joinquant.py")
+        result = subprocess.run(
+            ["python3", calc_script, "25", "0", "0.97"],
+            capture_output=True, text=True, timeout=60
+        )
+        
+        if result.returncode != 0:
+            return {"code": 500, "message": "计算失败", "error": result.stderr}
+        
+        python_result = json.loads(result.stdout)
+        
+        if not python_result.get("data", {}).get("etfs"):
+            return {"code": 500, "message": "未能获取ETF策略数据"}
+        
+        return {
+            "code": 200,
+            "data": python_result["data"]
+        }
+    except Exception as e:
+        return {"code": 500, "message": str(e)}
+
+
+@app.get("/api/strategy/oversold")
+def get_oversold_strategy():
+    """获取超跌策略"""
+    import subprocess
+    import json
+    
+    try:
+        script = os.path.join(os.path.dirname(__file__), "scripts", "calculate_oversold_strategy.py")
+        result = subprocess.run(
+            ["python3", script],
+            capture_output=True, text=True, timeout=60
+        )
+        
+        if result.returncode != 0:
+            return {"code": 500, "message": "计算失败", "error": result.stderr}
+        
+        return json.loads(result.stdout)
+    except Exception as e:
+        return {"code": 500, "message": str(e)}
+
+
 # ============== 健康检查 ==============
 
 @app.get("/api/health")

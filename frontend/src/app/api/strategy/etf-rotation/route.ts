@@ -1,28 +1,13 @@
 import { NextResponse } from 'next/server';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 
-const execAsync = promisify(exec);
-
-const CONFIG = {
-  lookbackDays: 25,
-  scoreThreshold: 0.0,
-  lossLimit: 0.97,
-};
+// API 基础 URL - 从环境变量读取
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
 
 export async function GET() {
   try {
-    // 先获取最新的市场数据（从腾讯API获取实时价格并更新配置文件）
-    const fetchScriptPath = '/app/server/scripts/fetch_market_data_from_db.py';
-    await execAsync(`python3 ${fetchScriptPath}`);
-
-    // 调用 Python 脚本计算动量得分
-    const scriptPath = '/app/server/scripts/calculate_momentum_joinquant.py';
-    const { stdout } = await execAsync(
-      `python3 ${scriptPath} ${CONFIG.lookbackDays} ${CONFIG.scoreThreshold} ${CONFIG.lossLimit}`
-    );
-
-    const pythonResult = JSON.parse(stdout);
+    // 调用 FastAPI 后端服务
+    const response = await fetch(`${API_BASE_URL}/api/strategy/etf-rotation`);
+    const pythonResult = await response.json();
 
     if (!pythonResult.data || !pythonResult.data.etfs || pythonResult.data.etfs.length === 0) {
       return NextResponse.json(
@@ -58,20 +43,21 @@ export async function GET() {
           score: recommendData?.score || null,
           estimatedScore: recommendData?.estimated_score || null,
         },
-        timestamp: new Date().toISOString(),
-        dataSource: '用户配置的真实数据（Python脚本计算）',
-        summary: {
-          total: pythonResult.data.summary.total,
-          recommended: pythonResult.data.summary.valid,
-          topPick: recommendData?.name || null,
-        },
+        lastUpdateTime: new Date().toLocaleString('zh-CN', {
+          timeZone: 'Asia/Shanghai',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
       },
-      message: 'success',
     });
   } catch (error: any) {
     console.error('获取ETF策略失败:', error);
     return NextResponse.json(
-      { code: 500, message: error.message || '获取ETF策略失败' },
+      { code: 500, message: `获取ETF策略失败: ${error.message}` },
       { status: 500 }
     );
   }
