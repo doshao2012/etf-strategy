@@ -38,48 +38,19 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const idNum = parseInt(id);
 
-    const dbPath = '/workspace/projects/server/database.sqlite';
-    
-    // 构建更新 SQL
-    const updates: string[] = [];
-    const values: any[] = [];
-    
-    if (body.code !== undefined) {
-      updates.push('code = ?');
-      values.push(body.code);
-    }
-    if (body.name !== undefined) {
-      updates.push('name = ?');
-      values.push(body.name);
-    }
-    if (body.market !== undefined) {
-      updates.push('market = ?');
-      values.push(body.market);
-    }
-    if (body.isActive !== undefined) {
-      updates.push('isActive = ?');
-      values.push(body.isActive ? 1 : 0);
-    }
+    const scriptPath = '/workspace/projects/server/scripts/update_etf_config.py';
+    const args = [
+      id,
+      body.code ? `"${body.code}"` : 'null',
+      body.name ? `"${body.name}"` : 'null',
+      body.market ? `"${body.market}"` : 'null',
+      body.isActive !== undefined ? (body.isActive ? '1' : '0') : 'null'
+    ];
 
-    if (updates.length === 0) {
-      return NextResponse.json({ message: '没有需要更新的字段' }, { status: 400 });
-    }
+    const { stdout } = await execAsync(`python3 ${scriptPath} ${args.join(' ')}`);
 
-    values.push(idNum);
-    const sql = `UPDATE etf_config SET ${updates.join(', ')} WHERE id = ?`;
-    
-    const { execAsync: execDb } = await import('child_process').then(m => ({ execAsync: promisify(m.exec) }));
-    const dbCmd = `sqlite3 "${dbPath}" "${sql.replace(/\?/g, "'$&'").replace(/'/g, "''")}"`;
-    
-    await execDb(dbCmd);
-
-    // 返回更新后的数据
-    const selectSql = `SELECT id, code, name, market, isActive FROM etf_config WHERE id = ${idNum}`;
-    const { stdout } = await execDb(`sqlite3 -json "${dbPath}" "${selectSql}"`);
-    const result = stdout.trim() ? JSON.parse(stdout)[0] : null;
-
+    const result = JSON.parse(stdout);
     return NextResponse.json(result);
   } catch (error: any) {
     console.error('更新ETF配置失败:', error);
