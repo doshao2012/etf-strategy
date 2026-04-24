@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y python3 python3-pip curl && \
 
 # 复制 Python 依赖文件并安装
 COPY server/requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
 # 复制所有代码
 COPY . .
