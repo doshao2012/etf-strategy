@@ -119,7 +119,6 @@ def get_all_etf_list() -> List[Dict]:
         {'code': '159729', 'name': '医药ETF', 'market': 'sz', 'category': '医药'},
         {'code': '512010', 'name': '医药ETF', 'market': 'sh', 'category': '医药'},
         {'code': '159729', 'name': '医药ETF', 'market': 'sz', 'category': '医药'},
-        {'code': '512980', 'name': '医疗器械ETF', 'market': 'sh', 'category': '医药'},
         {'code': '159883', 'name': '医疗器械ETF', 'market': 'sz', 'category': '医药'},
         {'code': '159765', 'name': '生物科技ETF', 'market': 'sz', 'category': '医药'},
         {'code': '512760', 'name': 'CXO ETF', 'market': 'sh', 'category': '医药'},
