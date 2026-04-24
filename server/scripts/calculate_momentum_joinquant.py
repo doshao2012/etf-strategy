@@ -2,17 +2,51 @@
 # -*- coding: utf-8 -*-
 """
 完全按照聚宽算法实现的ETF动量计算
+支持实时价格更新
 """
 import numpy as np
 import math
 import sys
 import json
 import sqlite3
+import requests
+import re
 from datetime import datetime
 
 # 从配置文件读取数据
 CONFIG_FILE = '/workspace/projects/server/src/modules/strategy/etf-real-data.config.ts'
 DB_PATH = '/workspace/projects/server/database.sqlite'
+
+
+def get_realtime_price(market, code):
+    """获取实时价格（从腾讯财经API）"""
+    try:
+        url = f"https://qt.gtimg.cn/q={market}{code}"
+        response = requests.get(url, timeout=5)
+        content = response.text
+        
+        # 解析数据
+        match = re.search(f'v_{market}{code}="([^"]+)"', content)
+        if not match:
+            return None
+        
+        data_str = match.group(1)
+        fields = data_str.split('~')
+        
+        if len(fields) < 10 or not fields[3]:
+            return None
+            
+        current = float(fields[3])
+        pre_close = float(fields[4]) if fields[4] else current
+        
+        # 如果当前价格等于昨收价，说明是非交易时间，返回昨收价
+        if current == 0 or abs(current - pre_close) < 0.001:
+            return pre_close
+            
+        return current
+    except Exception as e:
+        print(f"获取实时价格失败: {e}", file=sys.stderr)
+        return None
 
 def get_etf_configs():
     """从数据库读取所有启用的ETF配置"""
@@ -21,7 +55,7 @@ def get_etf_configs():
         cursor = conn.cursor()
 
         cursor.execute('''
-            SELECT code, name
+            SELECT code, market, name
             FROM etf_config
             WHERE isActive = 1
             ORDER BY createdAt ASC
@@ -29,7 +63,7 @@ def get_etf_configs():
 
         configs = {}
         for row in cursor.fetchall():
-            configs[row[0]] = row[1]
+            configs[row[0]] = {'name': row[2], 'market': row[1]}
 
         conn.close()
         return configs
@@ -38,7 +72,7 @@ def get_etf_configs():
         return {}
 
 def load_config():
-    """读取配置文件"""
+    """读取配置文件并获取实时价格"""
     with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
         content = f.read()
 
@@ -50,20 +84,39 @@ def load_config():
     etfs = {}
 
     # 遍历数据库中的所有ETF配置
-    for code, name in etf_configs.items():
+    for code, info in etf_configs.items():
         pattern = rf"'{code}':\s*(\[[\s\S]*?\])\s*(,|//)"
         match = re.search(pattern, content)
         if match:
             data_str = match.group(1)
             try:
                 data = json.loads(data_str)
+                # 获取实时价格
+                market = info['market']
+                realtime_price = get_realtime_price(market, code)
+                
+                # 如果获取到实时价格且与最后价格不同，更新最后一个数据点
+                if realtime_price and len(data) > 0:
+                    last_price = data[-1]['close']
+                    if abs(realtime_price - last_price) > 0.001:
+                        print(f"{info['name']}({code}): 更新价格 {last_price} -> {realtime_price}", file=sys.stderr)
+                        data[-1] = {
+                            'date': datetime.now().strftime('%Y-%m-%d'),
+                            'open': realtime_price,
+                            'high': realtime_price,
+                            'low': realtime_price,
+                            'close': realtime_price,
+                            'volume': 0
+                        }
+                
                 etfs[code] = {
                     'code': code,
-                    'name': name,
+                    'name': info['name'],
+                    'market': market,
                     'data': data
                 }
             except json.JSONDecodeError:
-                print(f"警告：无法解析 {name} ({code}) 的数据", file=sys.stderr)
+                print(f"警告：无法解析 {info['name']} ({code}) 的数据", file=sys.stderr)
                 continue
 
     return etfs
