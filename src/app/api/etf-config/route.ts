@@ -7,21 +7,13 @@ const execAsync = promisify(exec);
 // GET - 获取所有ETF配置
 export async function GET() {
   try {
-    const scriptPath = '/workspace/projects/server/scripts/get_etf_configs.py';
-    const { stdout } = await execAsync(`python3 ${scriptPath}`);
-
-    const configs = JSON.parse(stdout);
-    
-    // 转换为前端需要的格式，添加 id 和 isActive 字段
-    const transformedConfigs = configs.map((config: any, index: number) => ({
-      id: index + 1,  // 使用索引作为 id
-      code: config.code,
-      name: config.name,
-      market: config.market,
-      isActive: true,  // 默认为激活状态
-    }));
-
-    return NextResponse.json(transformedConfigs);
+    // 调用 FastAPI 后端服务
+    const response = await fetch('http://localhost:3000/api/etf-config');
+    if (!response.ok) {
+      throw new Error('获取ETF配置失败');
+    }
+    const data = await response.json();
+    return NextResponse.json(data);
   } catch (error: any) {
     console.error('获取ETF配置失败:', error);
     return NextResponse.json(

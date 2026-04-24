@@ -39,23 +39,24 @@ export async function PATCH(
     const { id } = await params;
     const body = await request.json();
 
-    const scriptPath = '/workspace/projects/server/scripts/update_etf_config.py';
-    const args = [
-      id,
-      body.code ? `"${body.code}"` : 'null',
-      body.name ? `"${body.name}"` : 'null',
-      body.market ? `"${body.market}"` : 'null',
-      body.isActive !== undefined ? (body.isActive ? '1' : '0') : 'null'
-    ];
+    // 调用 FastAPI 后端服务
+    const response = await fetch(`http://localhost:3000/api/etf-config/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
 
-    const { stdout } = await execAsync(`python3 ${scriptPath} ${args.join(' ')}`);
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || '更新失败');
+    }
 
-    const result = JSON.parse(stdout);
+    const result = await response.json();
     return NextResponse.json(result);
   } catch (error: any) {
     console.error('更新ETF配置失败:', error);
     return NextResponse.json(
-      { message: '更新ETF配置失败' },
+      { message: error.message || '更新ETF配置失败' },
       { status: 500 }
     );
   }
