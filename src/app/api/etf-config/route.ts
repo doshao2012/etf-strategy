@@ -11,7 +11,17 @@ export async function GET() {
     const { stdout } = await execAsync(`python3 ${scriptPath}`);
 
     const configs = JSON.parse(stdout);
-    return NextResponse.json(configs);
+    
+    // 转换为前端需要的格式，添加 id 和 isActive 字段
+    const transformedConfigs = configs.map((config: any, index: number) => ({
+      id: index + 1,  // 使用索引作为 id
+      code: config.code,
+      name: config.name,
+      market: config.market,
+      isActive: true,  // 默认为激活状态
+    }));
+
+    return NextResponse.json(transformedConfigs);
   } catch (error: any) {
     console.error('获取ETF配置失败:', error);
     return NextResponse.json(
