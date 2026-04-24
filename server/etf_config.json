@@ -1,0 +1,65 @@
+[
+  {
+    "id": 1,
+    "code": "159915",
+    "name": "创业板ETF",
+    "market": "sz",
+    "isActive": true
+  },
+  {
+    "id": 2,
+    "code": "518880",
+    "name": "黄金ETF",
+    "market": "sh",
+    "isActive": true
+  },
+  {
+    "id": 3,
+    "code": "513100",
+    "name": "纳指ETF",
+    "market": "sh",
+    "isActive": true
+  },
+  {
+    "id": 4,
+    "code": "511220",
+    "name": "城投债ETF",
+    "market": "sh",
+    "isActive": true
+  },
+  {
+    "id": 5,
+    "code": "588000",
+    "name": "科创50ETF",
+    "market": "sh",
+    "isActive": true
+  },
+  {
+    "id": 6,
+    "code": "159985",
+    "name": "豆粕ETF",
+    "market": "sz",
+    "isActive": true
+  },
+  {
+    "id": 7,
+    "code": "513260",
+    "name": "恒生科技ETF",
+    "market": "sh",
+    "isActive": true
+  },
+  {
+    "id": 8,
+    "code": "588220",
+    "name": "科创100",
+    "market": "sh",
+    "isActive": true
+  },
+  {
+    "id": 9,
+    "code": "588230",
+    "name": "科创200",
+    "market": "sh",
+    "isActive": true
+  }
+]
