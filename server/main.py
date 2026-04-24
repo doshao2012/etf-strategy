@@ -22,7 +22,7 @@ app.add_middleware(
 )
 
 # Railway 持久化存储路径
-DB_PATH = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "/workspace/projects/server") + "/database.sqlite"
+DB_PATH = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "/app/server") + "/database.sqlite"
 
 
 # ============== 数据模型 ==============

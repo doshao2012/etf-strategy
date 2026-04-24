@@ -11,8 +11,8 @@ import sqlite3
 from datetime import datetime
 
 # 从配置文件读取数据
-CONFIG_FILE = '/workspace/projects/server/src/modules/strategy/etf-real-data.config.ts'
-DB_PATH = '/workspace/projects/server/database.sqlite'
+CONFIG_FILE = '/app/server/src/modules/strategy/etf-real-data.config.ts'
+DB_PATH = '/app/server/database.sqlite'
 
 def get_etf_configs():
     """从数据库读取所有启用的ETF配置"""

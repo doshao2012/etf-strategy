@@ -13,7 +13,7 @@ start_service() {
     # 启动 FastAPI 后端（端口 3000）
     echo "Starting FastAPI backend on port 3000..."
     cd server
-    nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 3000 > /app/work/logs/bypass/fastapi.log 2>&1 &
+    python3 -m uvicorn main:app --host 0.0.0.0 --port 3000 &
     cd ..
     
     echo "Starting HTTP service on port ${DEPLOY_RUN_PORT} for deploy..."

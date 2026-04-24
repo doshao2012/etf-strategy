@@ -13,11 +13,11 @@ const CONFIG = {
 export async function GET() {
   try {
     // 先获取最新的市场数据（从腾讯API获取实时价格并更新配置文件）
-    const fetchScriptPath = '/workspace/projects/server/scripts/fetch_market_data_from_db.py';
+    const fetchScriptPath = '/app/server/scripts/fetch_market_data_from_db.py';
     await execAsync(`python3 ${fetchScriptPath}`);
 
     // 调用 Python 脚本计算动量得分
-    const scriptPath = '/workspace/projects/server/scripts/calculate_momentum_joinquant.py';
+    const scriptPath = '/app/server/scripts/calculate_momentum_joinquant.py';
     const { stdout } = await execAsync(
       `python3 ${scriptPath} ${CONFIG.lookbackDays} ${CONFIG.scoreThreshold} ${CONFIG.lossLimit}`
     );

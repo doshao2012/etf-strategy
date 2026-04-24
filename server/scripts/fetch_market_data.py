@@ -212,7 +212,7 @@ export interface PriceDataRow {
 """
 
         # 写入文件
-        with open('/workspace/projects/server/src/modules/strategy/etf-real-data.config.ts', 'w', encoding='utf-8') as f:
+        with open('/app/server/src/modules/strategy/etf-real-data.config.ts', 'w', encoding='utf-8') as f:
             f.write(config_content)
 
         print(f"✅ 配置文件已更新")

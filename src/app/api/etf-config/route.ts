@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const scriptPath = '/workspace/projects/server/scripts/add_etf_config.py';
+    const scriptPath = '/app/server/scripts/add_etf_config.py';
     const { stdout } = await execAsync(
       `python3 ${scriptPath} "${code}" "${name}" "${market}" ${isActive ? 1 : 0}`
     );

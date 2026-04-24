@@ -65,7 +65,7 @@ export interface PriceDataRow {
 """
 
     # 写入配置文件
-    config_file = '/workspace/projects/server/src/modules/strategy/etf-real-data.config.ts'
+    config_file = '/app/server/src/modules/strategy/etf-real-data.config.ts'
     with open(config_file, 'w', encoding='utf-8') as f:
         f.write(config_content)
 

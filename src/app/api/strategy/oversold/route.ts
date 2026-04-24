@@ -6,7 +6,7 @@ const execAsync = promisify(exec);
 
 export async function GET() {
   try {
-    const scriptPath = '/workspace/projects/server/scripts/calculate_oversold_strategy.py';
+    const scriptPath = '/app/server/scripts/calculate_oversold_strategy.py';
     const { stdout } = await execAsync(`python3 ${scriptPath} --quiet`);
 
     // 从stdout中提取JSON

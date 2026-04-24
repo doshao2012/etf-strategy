@@ -10,7 +10,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const scriptPath = '/workspace/projects/server/scripts/get_etf_config.py';
+    const scriptPath = '/app/server/scripts/get_etf_config.py';
     const { stdout } = await execAsync(`python3 ${scriptPath} ${id}`);
 
     const config = JSON.parse(stdout);
@@ -69,7 +69,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const scriptPath = '/workspace/projects/server/scripts/delete_etf_config.py';
+    const scriptPath = '/app/server/scripts/delete_etf_config.py';
     const { stdout } = await execAsync(`python3 ${scriptPath} ${id}`);
 
     const result = JSON.parse(stdout);

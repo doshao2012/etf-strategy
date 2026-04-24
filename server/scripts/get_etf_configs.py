@@ -7,7 +7,7 @@ import sqlite3
 import json
 import sys
 
-DB_PATH = '/workspace/projects/server/database.sqlite'
+DB_PATH = '/app/server/database.sqlite'
 
 def get_etf_configs():
     """从数据库读取所有启用的ETF配置"""
