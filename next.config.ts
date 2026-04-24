@@ -13,6 +13,8 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // 生产模式独立运行
+  output: 'standalone',
 };
 
 export default nextConfig;

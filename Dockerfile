@@ -21,11 +21,11 @@ RUN pip3 install --no-cache-dir --break-system-packages -r server/requirements.t
 # 安装 Node.js 依赖
 RUN pnpm install
 
-# 构建前端
+# 构建前端（独立输出）
 RUN pnpm run build
 
 # 暴露端口
-ENV PORT=3000
+ENV PORT=5000
 
 # 启动命令
-ENTRYPOINT ["sh", "-c", "cd server && python3 -m uvicorn main:app --host 0.0.0.0 --port 3000 & pnpm start"]
+CMD ["sh", "-c", "cd server && python3 -m uvicorn main:app --host 0.0.0.0 --port 3000 & sleep 2 && PORT=$PORT node .next/standalone/server.js"]
