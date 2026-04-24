@@ -5,6 +5,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# 先复制 Python 依赖文件
+COPY server/requirements.txt .
+
+# 安装 Python 依赖
+RUN pip3 install --no-cache-dir -r requirements.txt
+
 # 安装 Node.js 20
 RUN apt-get update && apt-get install -y curl && \
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
@@ -16,9 +22,6 @@ RUN npm install -g pnpm
 
 # 复制所有代码
 COPY . .
-
-# 安装 Python 依赖
-RUN pip3 install --no-cache-dir -r requirements.txt || echo "Python deps installed"
 
 # 安装 Node.js 依赖
 RUN pnpm install
