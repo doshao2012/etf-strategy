@@ -19,7 +19,7 @@ DB_PATH = '/workspace/projects/server/database.sqlite'
 
 
 def get_realtime_price(market, code):
-    """获取实时价格（从腾讯财经API）"""
+    """获取实时价格和涨跌幅（从腾讯财经API）"""
     try:
         url = f"https://qt.gtimg.cn/q={market}{code}"
         response = requests.get(url, timeout=5)
@@ -28,25 +28,24 @@ def get_realtime_price(market, code):
         # 解析数据
         match = re.search(f'v_{market}{code}="([^"]+)"', content)
         if not match:
-            return None
+            return None, None
         
         data_str = match.group(1)
         fields = data_str.split('~')
         
         if len(fields) < 10 or not fields[3]:
-            return None
-            
+            return None, None
+        
         current = float(fields[3])
         pre_close = float(fields[4]) if fields[4] else current
         
-        # 如果当前价格等于昨收价，说明是非交易时间，返回昨收价
-        if current == 0 or abs(current - pre_close) < 0.001:
-            return pre_close
+        # 涨跌幅直接用API返回的 change_pct (字段32)
+        change_pct = float(fields[32]) if fields[32] else None
             
-        return current
+        return current, change_pct
     except Exception as e:
         print(f"获取实时价格失败: {e}", file=sys.stderr)
-        return None
+        return None, None
 
 def get_etf_configs():
     """从数据库读取所有启用的ETF配置"""
@@ -55,7 +54,7 @@ def get_etf_configs():
         cursor = conn.cursor()
 
         cursor.execute('''
-            SELECT code, market, name
+            SELECT code, name, market
             FROM etf_config
             WHERE isActive = 1
             ORDER BY createdAt ASC
@@ -63,7 +62,7 @@ def get_etf_configs():
 
         configs = {}
         for row in cursor.fetchall():
-            configs[row[0]] = {'name': row[2], 'market': row[1]}
+            configs[row[0]] = {'name': row[1], 'market': row[2]}
 
         conn.close()
         return configs
@@ -72,7 +71,7 @@ def get_etf_configs():
         return {}
 
 def load_config():
-    """读取配置文件并获取实时价格"""
+    """读取配置文件"""
     with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
         content = f.read()
 
@@ -91,28 +90,10 @@ def load_config():
             data_str = match.group(1)
             try:
                 data = json.loads(data_str)
-                # 获取实时价格
-                market = info['market']
-                realtime_price = get_realtime_price(market, code)
-                
-                # 如果获取到实时价格且与最后价格不同，更新最后一个数据点
-                if realtime_price and len(data) > 0:
-                    last_price = data[-1]['close']
-                    if abs(realtime_price - last_price) > 0.001:
-                        print(f"{info['name']}({code}): 更新价格 {last_price} -> {realtime_price}", file=sys.stderr)
-                        data[-1] = {
-                            'date': datetime.now().strftime('%Y-%m-%d'),
-                            'open': realtime_price,
-                            'high': realtime_price,
-                            'low': realtime_price,
-                            'close': realtime_price,
-                            'volume': 0
-                        }
-                
                 etfs[code] = {
                     'code': code,
                     'name': info['name'],
-                    'market': market,
+                    'market': info['market'],
                     'data': data
                 }
             except json.JSONDecodeError:
@@ -120,6 +101,85 @@ def load_config():
                 continue
 
     return etfs
+
+
+def get_etf_metrics(etf_info, realtime_prices):
+    """
+    获取ETF指标（使用腾讯API的实时数据）
+    
+    realtime_prices: dict, 格式 {code: {'price': float, 'change_pct': float}}
+    """
+    try:
+        data = etf_info['data']
+        if len(data) < 26:
+            return None
+
+        # 基础数据
+        code = etf_info['code']
+        name = etf_info['name']
+        realtime = realtime_prices.get(code, {})
+        
+        # 使用腾讯API的实时价格和涨跌幅
+        current_price = realtime.get('price', data[-1]['close'])
+        change_pct = realtime.get('change_pct')
+        
+        # 如果API没返回涨跌幅，用昨天的收盘价计算
+        if change_pct is None:
+            last_close = data[-2]['close']
+            change_pct = (current_price / last_close - 1) * 100
+
+        # 动量计算（使用历史数据，不包含实时价格）
+        prices = np.array([d['close'] for d in data])
+        score, r_squared, slope, ann_return = calculate_momentum(prices)
+        
+        # 预估动量得分（假设明天价格不变）
+        estimated_prices = prices[1:]
+        estimated_prices = np.append(estimated_prices, current_price)
+        estimated_score, _, _, _ = calculate_momentum(estimated_prices)
+
+        # 状态判定
+        status = "正常"
+        ratios = [prices[-1]/prices[-2], prices[-2]/prices[-3], prices[-3]/prices[-4]]
+        if min(ratios) < 0.97:
+            status = "⚠️ 跌幅拦截"
+            score = -0.01
+        elif score < 0.0:
+            status = "分值过低"
+
+        return {
+            'code': code,
+            'name': name,
+            'score': round(score, 4),
+            'estimated_score': round(estimated_score, 4),
+            'r_squared': round(r_squared, 3),
+            'price': round(current_price, 3),
+            'today_pct': round(change_pct, 2),
+            'status': status,
+            'ann_return': round(ann_return, 4),
+            'slope': round(slope, 6)
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def fetch_all_realtime_prices(etf_configs):
+    """批量获取所有ETF的实时价格"""
+    realtime_prices = {}
+    
+    for code, info in etf_configs.items():
+        # 判断市场（使用配置中的市场，而不是根据代码判断）
+        market = info.get('market', 'sz' if not code.startswith('5') else 'sh')
+        
+        price, change_pct = get_realtime_price(market, code)
+        if price:
+            realtime_prices[code] = {
+                'price': price,
+                'change_pct': change_pct
+            }
+    
+    return realtime_prices
 
 def calculate_momentum(prices):
     """
@@ -221,13 +281,19 @@ def main():
     score_threshold = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0
     loss_limit = float(sys.argv[3]) if len(sys.argv) > 3 else 0.97
 
+    # 获取所有ETF配置
+    etf_configs = get_etf_configs()
+
+    # 先批量获取所有实时价格
+    realtime_prices = fetch_all_realtime_prices(etf_configs)
+
     # 加载数据
     etfs = load_config()
 
     # 计算所有ETF的指标
     results = []
     for code, etf_info in etfs.items():
-        metrics = get_metrics(etf_info, lookback_days, score_threshold, loss_limit)
+        metrics = get_etf_metrics(etf_info, realtime_prices)
         if metrics:
             results.append(metrics)
 
@@ -236,7 +302,7 @@ def main():
 
     # 找出得分最高的ETF
     recommend = None
-    valid_etfs = [r for r in results if r['score'] >= score_threshold]
+    valid_etfs = [r for r in results if r['score'] >= score_threshold and r['status'] == '正常']
     if valid_etfs:
         recommend = valid_etfs[0]['code']
 
