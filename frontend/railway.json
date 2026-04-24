@@ -1,7 +1,23 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS"
+    "builder": "NIXPACKS",
+    "nixpacksPlan": {
+      "phases": {
+        "setup": {
+          "nixPkgs": ["nodejs_20"]
+        },
+        "install": {
+          "cmds": ["pnpm install"]
+        },
+        "build": {
+          "cmds": ["pnpm run build"]
+        }
+      },
+      "start": {
+        "cmd": "pnpm start"
+      }
+    }
   },
   "deploy": {
     "numInstances": 1,
