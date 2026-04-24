@@ -6,15 +6,13 @@ COZE_WORKSPACE_PATH="${COZE_WORKSPACE_PATH:-$(pwd)}"
 PORT=5000
 DEPLOY_RUN_PORT="${DEPLOY_RUN_PORT:-$PORT}"
 
-# 清理占用端口的进程
+# 使用 fuser 清理端口（比 lsof 更可靠）
 cleanup_port() {
     local port=$1
-    local pids=$(lsof -ti:$port 2>/dev/null || true)
-    if [ -n "$pids" ]; then
-        echo "Killing processes on port $port: $pids"
-        echo "$pids" | xargs kill -9 2>/dev/null || true
-        sleep 1
-    fi
+    echo "Checking port $port..."
+    # 使用 fuser 杀死占用端口的进程
+    fuser -k $port/tcp 2>/dev/null || true
+    sleep 1
 }
 
 start_service() {
@@ -22,7 +20,6 @@ start_service() {
     
     # 清理端口
     cleanup_port 3000
-    cleanup_port $DEPLOY_RUN_PORT
     
     # 启动 FastAPI 后端（端口 3000）
     echo "Starting FastAPI backend on port 3000..."
@@ -31,7 +28,7 @@ start_service() {
     cd ..
     
     # 等待后端启动
-    sleep 2
+    sleep 3
     
     echo "Starting HTTP service on port ${DEPLOY_RUN_PORT} for deploy..."
     PORT=${DEPLOY_RUN_PORT} node dist/server.js

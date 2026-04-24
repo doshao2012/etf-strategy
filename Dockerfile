@@ -5,8 +5,8 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# 安装 Python 和 lsof
-RUN apt-get update && apt-get install -y python3 python3-pip curl lsof && \
+# 安装 Python、curl、fuser
+RUN apt-get update && apt-get install -y python3 python3-pip curl fuser && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 安装 pnpm
