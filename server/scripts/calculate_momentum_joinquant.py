@@ -124,10 +124,26 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         elif score < score_threshold:
             status = "分值过低"
 
+        # 4. 预估动量得分
+        # 假设明天价格不变，去掉最老的价格，加上当前价格，重新计算
+        estimated_prices = np.append(prices[1:], current_price)
+        y_est = np.log(estimated_prices)
+        x_est = np.arange(len(y_est))
+        weights_est = np.linspace(1, 2, len(y_est))
+        slope_est, _ = np.polyfit(x_est, y_est, 1, w=weights_est)
+        
+        ss_res_est = np.sum(weights_est * (y_est - (slope_est * x_est + np.mean(y_est))) ** 2)
+        ss_tot_est = np.sum(weights_est * (y_est - np.mean(y_est)) ** 2)
+        r_squared_est = 1 - ss_res_est / ss_tot_est if ss_tot_est else 0
+        
+        ann_return_est = math.exp(slope_est * 250) - 1
+        estimated_score = ann_return_est * r_squared_est
+
         return {
             'code': etf_info['code'],
             'name': etf_info['name'],
             'score': round(score, 4),
+            'estimated_score': round(estimated_score, 4),
             'r_squared': round(r_squared, 3),
             'price': round(current_price, 3),
             'today_pct': round(today_pct, 2),
