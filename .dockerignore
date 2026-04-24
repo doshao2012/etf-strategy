@@ -1,3 +1,7 @@
+# Git
+.git
+.gitignore
+
 # Dependencies
 node_modules
 .pnpm-store
@@ -6,11 +10,10 @@ node_modules
 .next
 dist
 out
-*.tsbuildinfo
 
 # Logs
-logs
 *.log
+logs
 
 # Environment
 .env
@@ -28,8 +31,13 @@ logs
 Thumbs.db
 
 # Test
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
 coverage
 
 # Misc
+*.md
+*.txt
 *.bak
-*.backup

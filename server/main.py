@@ -8,6 +8,8 @@ from typing import Optional
 import sqlite3
 from datetime import datetime
 
+import os
+
 app = FastAPI(title="ETF 策略服务", version="1.0.0")
 
 # CORS 配置
@@ -19,7 +21,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DB_PATH = "/workspace/projects/server/database.sqlite"
+# Railway 持久化存储路径
+DB_PATH = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "/workspace/projects/server") + "/database.sqlite"
 
 
 # ============== 数据模型 ==============
@@ -188,4 +191,6 @@ def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=3000)
+    import os
+    port = int(os.getenv("PORT", "3000"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
