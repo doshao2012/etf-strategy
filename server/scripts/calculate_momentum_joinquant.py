@@ -100,19 +100,24 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
 
         # 2. 动量得分 & 稳定性计算 (线性加权回归)
         # 使用全部26个数据点进行动量计算
-        y = np.log(prices)
-        x = np.arange(len(y))
-        weights = np.linspace(1, 2, len(y))
-        slope, intercept = np.polyfit(x, y, 1, w=weights)
-
-        # R² 稳定性
-        ss_res = np.sum(weights * (y - (slope * x + intercept)) ** 2)
-        ss_tot = np.sum(weights * (y - np.mean(y)) ** 2)
-        r_squared = 1 - ss_res / ss_tot if ss_tot else 0
-
-        # 综合得分 = 年化(slope*250转指数) * R²
-        ann_return = math.exp(slope * 250) - 1
-        score = ann_return * r_squared
+        def calculate_momentum(price_data):
+            """计算动量得分，复用原始策略公式"""
+            y = np.log(price_data)
+            x = np.arange(len(y))
+            weights = np.linspace(1, 2, len(y))
+            slope, intercept = np.polyfit(x, y, 1, w=weights)
+            
+            # R² 稳定性
+            ss_res = np.sum(weights * (y - (slope * x + intercept)) ** 2)
+            ss_tot = np.sum(weights * (y - np.mean(y)) ** 2)
+            r_squared = 1 - ss_res / ss_tot if ss_tot else 0
+            
+            # 综合得分 = 年化(slope*250转指数) * R²
+            ann_return = math.exp(slope * 250) - 1
+            score = ann_return * r_squared
+            return score, r_squared, ann_return, slope
+        
+        score, r_squared, ann_return, slope = calculate_momentum(prices)
 
         # 3. 状态判定
         status = "正常"
@@ -124,10 +129,16 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         elif score < score_threshold:
             status = "分值过低"
 
+        # 3. 预估动量得分
+        # 假设明天价格不变，去掉最老的价格，加上当前价格，重新计算
+        estimated_prices = np.append(prices[1:], current_price)
+        estimated_score, _, _, _ = calculate_momentum(estimated_prices)
+
         return {
             'code': etf_info['code'],
             'name': etf_info['name'],
             'score': round(score, 4),
+            'estimated_score': round(estimated_score, 4),
             'r_squared': round(r_squared, 3),
             'price': round(current_price, 3),
             'today_pct': round(today_pct, 2),
