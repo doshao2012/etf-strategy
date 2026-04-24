@@ -1,11 +1,8 @@
 [nixpacks]
 node_version = "20"
 
-[phases.setup]
-nixPkgs = ["nodejs_20", "python3"]
-
 [phases.install]
-cmds = ["pip3 install -r backend/requirements.txt", "pnpm install"]
+cmds = ["pnpm install"]
 
 [phases.build]
 cmds = ["pnpm run build"]
