@@ -10,25 +10,24 @@ import sys
 DB_PATH = '/workspace/projects/server/database.sqlite'
 
 def get_etf_configs():
-    """从数据库读取所有ETF配置"""
+    """从数据库读取所有启用的ETF配置"""
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
         cursor.execute('''
-            SELECT id, code, market, name, isActive
+            SELECT code, market, name
             FROM etf_config
+            WHERE isActive = 1
             ORDER BY createdAt ASC
         ''')
 
         configs = []
         for row in cursor.fetchall():
             configs.append({
-                'id': row[0],
-                'code': row[1],
-                'market': row[2],
-                'name': row[3],
-                'isActive': bool(row[4]),
+                'code': row[0],
+                'market': '0' if row[1] == 'sz' else '1',
+                'name': row[2],
             })
 
         conn.close()

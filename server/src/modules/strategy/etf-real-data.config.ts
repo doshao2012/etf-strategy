@@ -1,5 +1,5 @@
 // ETF二级市场交易数据配置
-// 自动生成于: 2026-04-24 11:09:28
+// 自动生成于: 2026-04-24 11:13:16
 // 数据来源: 腾讯财经实时行情 + 历史K线
 
 export const REAL_ETF_DATA: { [code: string]: PriceDataRow[] } = {
@@ -31,7 +31,7 @@ export const REAL_ETF_DATA: { [code: string]: PriceDataRow[] } = {
     {"date": "2026-04-21", "open": 3.663, "high": 3.688, "low": 3.614, "close": 3.681, "volume": 1382838279},
     {"date": "2026-04-22", "open": 3.66, "high": 3.761, "low": 3.66, "close": 3.758, "volume": 1861500562},
     {"date": "2026-04-23", "open": 3.769, "high": 3.789, "low": 3.684, "close": 3.728, "volume": 1458092107},
-    {"date": "2026-04-24", "open": 3.65, "high": 3.65, "low": 3.65, "close": 3.65, "volume": 9652880}
+    {"date": "2026-04-24", "open": 3.65, "high": 3.65, "low": 3.65, "close": 3.65, "volume": 10082269}
   ],
 
   // 黄金ETF (518880)
@@ -62,7 +62,7 @@ export const REAL_ETF_DATA: { [code: string]: PriceDataRow[] } = {
     {"date": "2026-04-21", "open": 10.07, "high": 10.072, "low": 10.003, "close": 10.01, "volume": 323902876},
     {"date": "2026-04-22", "open": 9.968, "high": 10.008, "low": 9.968, "close": 10.004, "volume": 364219794},
     {"date": "2026-04-23", "open": 9.935, "high": 9.947, "low": 9.865, "close": 9.9, "volume": 426785130},
-    {"date": "2026-04-24", "open": 9.821, "high": 9.821, "low": 9.821, "close": 9.821, "volume": 1430209}
+    {"date": "2026-04-24", "open": 9.821, "high": 9.821, "low": 9.821, "close": 9.821, "volume": 1471996}
   ],
 
   // 纳指ETF (513100)
@@ -93,7 +93,7 @@ export const REAL_ETF_DATA: { [code: string]: PriceDataRow[] } = {
     {"date": "2026-04-21", "open": 1.893, "high": 1.897, "low": 1.875, "close": 1.892, "volume": 234369426},
     {"date": "2026-04-22", "open": 1.89, "high": 1.898, "low": 1.884, "close": 1.896, "volume": 204704591},
     {"date": "2026-04-23", "open": 1.907, "high": 1.917, "low": 1.897, "close": 1.905, "volume": 304649830},
-    {"date": "2026-04-24", "open": 1.903, "high": 1.903, "low": 1.903, "close": 1.903, "volume": 1061715}
+    {"date": "2026-04-24", "open": 1.902, "high": 1.902, "low": 1.902, "close": 1.902, "volume": 1074935}
   ],
 
   // 城投债ETF (511220)
@@ -124,7 +124,7 @@ export const REAL_ETF_DATA: { [code: string]: PriceDataRow[] } = {
     {"date": "2026-04-21", "open": 10.33, "high": 10.331, "low": 10.328, "close": 10.329, "volume": 152620000},
     {"date": "2026-04-22", "open": 10.331, "high": 10.334, "low": 10.33, "close": 10.332, "volume": 160856079},
     {"date": "2026-04-23", "open": 10.334, "high": 10.336, "low": 10.316, "close": 10.333, "volume": 106744300},
-    {"date": "2026-04-24", "open": 10.335, "high": 10.335, "low": 10.335, "close": 10.335, "volume": 528809}
+    {"date": "2026-04-24", "open": 10.336, "high": 10.336, "low": 10.336, "close": 10.336, "volume": 532722}
   ],
 
   // 科创50ETF (588000)
@@ -155,7 +155,7 @@ export const REAL_ETF_DATA: { [code: string]: PriceDataRow[] } = {
     {"date": "2026-04-21", "open": 1.523, "high": 1.523, "low": 1.491, "close": 1.504, "volume": 2326183182},
     {"date": "2026-04-22", "open": 1.496, "high": 1.53, "low": 1.495, "close": 1.529, "volume": 2362275286},
     {"date": "2026-04-23", "open": 1.543, "high": 1.545, "low": 1.494, "close": 1.508, "volume": 2557880448},
-    {"date": "2026-04-24", "open": 1.522, "high": 1.522, "low": 1.522, "close": 1.522, "volume": 17101540}
+    {"date": "2026-04-24", "open": 1.523, "high": 1.523, "low": 1.523, "close": 1.523, "volume": 17655041}
   ],
 
   // 豆粕ETF (159985)
@@ -186,7 +186,7 @@ export const REAL_ETF_DATA: { [code: string]: PriceDataRow[] } = {
     {"date": "2026-04-21", "open": 2.099, "high": 2.127, "low": 2.092, "close": 2.127, "volume": 178077745},
     {"date": "2026-04-22", "open": 2.15, "high": 2.189, "low": 2.15, "close": 2.169, "volume": 307139219},
     {"date": "2026-04-23", "open": 2.153, "high": 2.18, "low": 2.138, "close": 2.156, "volume": 188419774},
-    {"date": "2026-04-24", "open": 2.129, "high": 2.129, "low": 2.129, "close": 2.129, "volume": 571178}
+    {"date": "2026-04-24", "open": 2.13, "high": 2.13, "low": 2.13, "close": 2.13, "volume": 584148}
   ],
 
   // 恒生科技ETF (513260)
@@ -217,7 +217,7 @@ export const REAL_ETF_DATA: { [code: string]: PriceDataRow[] } = {
     {"date": "2026-04-21", "open": 1.249, "high": 1.249, "low": 1.232, "close": 1.24, "volume": 198045500},
     {"date": "2026-04-22", "open": 1.23, "high": 1.23, "low": 1.215, "close": 1.223, "volume": 229102400},
     {"date": "2026-04-23", "open": 1.222, "high": 1.222, "low": 1.193, "close": 1.197, "volume": 295717000},
-    {"date": "2026-04-24", "open": 1.195, "high": 1.195, "low": 1.195, "close": 1.195, "volume": 1322034}
+    {"date": "2026-04-24", "open": 1.195, "high": 1.195, "low": 1.195, "close": 1.195, "volume": 1378930}
   ],
 
 };
