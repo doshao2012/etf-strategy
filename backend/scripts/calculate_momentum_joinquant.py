@@ -10,10 +10,39 @@ import json
 import os
 import requests
 import re
+import time
 from datetime import datetime, timedelta
 
 # 配置文件路径
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), '..', 'etf_config.json')
+# 缓存文件路径
+CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'data_cache.json')
+# 缓存有效期（秒）- 5分钟内不重复获取数据
+CACHE_TTL = 300
+
+def load_cache():
+    """加载缓存"""
+    try:
+        if os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+                cache = json.load(f)
+            # 检查缓存是否过期
+            if time.time() - cache.get('timestamp', 0) < CACHE_TTL:
+                return cache.get('data')
+    except:
+        pass
+    return None
+
+def save_cache(data):
+    """保存缓存"""
+    try:
+        cache_dir = os.path.dirname(CACHE_FILE)
+        if not os.path.exists(cache_dir):
+            os.makedirs(cache_dir)
+        with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'timestamp': time.time(), 'data': data}, f)
+    except Exception as e:
+        print(f"保存缓存失败: {e}", file=sys.stderr)
 
 def get_realtime_price(market, code):
     """获取实时价格"""
