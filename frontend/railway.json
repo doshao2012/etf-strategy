@@ -4,11 +4,8 @@
     "builder": "NIXPACKS",
     "nixpacksPlan": {
       "phases": {
-        "setup": {
-          "nixPkgs": ["nodejs_20"]
-        },
         "install": {
-          "cmds": ["pnpm install --force"]
+          "cmds": ["npm install -g pnpm@9 && pnpm install --force"]
         }
       }
     }
