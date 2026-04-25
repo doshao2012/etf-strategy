@@ -14,9 +14,11 @@ from datetime import datetime, timedelta
 
 # 配置文件路径
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), '..', 'etf_config.json')
+# 历史数据缓存文件
+HISTORY_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'history_cache.json')
 
 def get_realtime_price(market, code):
-    """获取实时价格"""
+    """获取实时价格（不缓存，每次都获取最新）"""
     try:
         url = f"https://qt.gtimg.cn/q={market}{code}"
         response = requests.get(url, timeout=5)
@@ -38,13 +40,40 @@ def get_realtime_price(market, code):
         print(f"获取实时价格失败: {e}", file=sys.stderr)
         return None, None
 
-def get_historical_prices(market, code, days=30):
-    """获取历史K线数据"""
+def load_history_cache():
+    """加载历史数据缓存"""
     try:
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days + 20)
-        
-        # 使用新浪财经获取历史K线数据
+        if os.path.exists(HISTORY_CACHE_FILE):
+            with open(HISTORY_CACHE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except:
+        pass
+    return {}
+
+def save_history_cache(cache):
+    """保存历史数据缓存"""
+    try:
+        with open(HISTORY_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, ensure_ascii=False)
+    except Exception as e:
+        print(f"保存历史缓存失败: {e}", file=sys.stderr)
+
+def get_historical_prices(market, code, days=30):
+    """获取历史K线数据（按天缓存）"""
+    today = datetime.now().strftime('%Y-%m-%d')
+    cache_key = f"{market}_{code}"
+    
+    # 检查缓存
+    cache = load_history_cache()
+    cached_data = cache.get(cache_key)
+    
+    if cached_data and cached_data.get('date') == today:
+        print(f"使用缓存的历史数据: {code}")
+        data = cached_data.get('data', [])
+        return [{'close': float(item['close'])} for item in data[-days:]]
+    
+    # 从新浪获取历史数据
+    try:
         url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={market}{code}&scale=240&ma=no&datalen={days+30}"
         
         response = requests.get(url, timeout=15)
@@ -57,7 +86,11 @@ def get_historical_prices(market, code, days=30):
         if not data:
             return []
         
-        # 返回包含 close 的数据格式
+        # 保存到缓存
+        cache[cache_key] = {'date': today, 'data': data}
+        save_history_cache(cache)
+        
+        # 返回指定天数的数据
         return [{'close': float(item['close'])} for item in data[-days:]]
         
     except Exception as e:
