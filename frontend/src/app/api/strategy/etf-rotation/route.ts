@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 // API 基础 URL - 从环境变量读取，移除尾随斜杠
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '').replace(/^http:/, 'https:');
 
 export async function GET() {
   try {
