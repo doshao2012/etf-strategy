@@ -5,17 +5,11 @@
     "nixpacksPlan": {
       "phases": {
         "setup": {
-          "nixPkgs": ["nodejs_20", "pnpm"]
+          "nixPkgs": ["nodejs_20"]
         },
         "install": {
-          "cmds": ["pnpm install"]
-        },
-        "build": {
-          "cmds": ["pnpm run build"]
+          "cmds": ["pnpm install --force"]
         }
-      },
-      "start": {
-        "cmd": "pnpm start"
       }
     }
   },
