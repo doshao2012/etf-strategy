@@ -7,7 +7,7 @@
     "dev": "pnpm next dev",
     "preinstall": "npx only-allow pnpm",
     "lint": "eslint",
-    "start": "pnpm next start",
+    "start": "sh ./scripts/start.sh",
     "ts-check": "tsc -p tsconfig.json"
   },
   "dependencies": {
