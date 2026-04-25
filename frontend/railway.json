@@ -1,20 +1,8 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
-    "builder": "NIXPACKS",
-    "nixpacksPlan": {
-      "env": {
-        "NODE_VERSION": "20"
-      },
-      "phases": {
-        "install": {
-          "cmds": ["npm install -g pnpm@9", "pnpm install --force"]
-        },
-        "build": {
-          "cmds": ["pnpm run build"]
-        }
-      }
-    }
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile"
   },
   "deploy": {
     "numInstances": 1,
