@@ -100,25 +100,25 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
           {/* 动量得分 */}
           <div className="bg-emerald-50 rounded-lg p-3 text-center">
             <p className="text-xs text-slate-500 mb-1">动量得分</p>
-            <p className={`text-xl font-bold ${etf.score >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-              {etf.score.toFixed(4)}
+            <p className={`text-xl font-bold ${(etf.score ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+              {(etf.score ?? 0).toFixed(4)}
             </p>
-            <p className={`text-xs font-medium mt-1 ${(etf.estimatedScore || 0) >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
-              预 {(etf.estimatedScore || 0).toFixed(4)}
+            <p className={`text-xs font-medium mt-1 ${(etf.estimatedScore ?? 0) >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
+              预 {((etf.estimatedScore) ?? etf.score ?? 0).toFixed(4)}
             </p>
           </div>
           {/* 稳定性 R² */}
           <div className="bg-purple-50 rounded-lg p-3 text-center">
             <p className="text-xs text-slate-500 mb-1">稳定性(R²)</p>
             <p className="text-xl font-bold text-purple-600">
-              {etf.rSquared.toFixed(3)}
+              {(etf.rSquared ?? 0).toFixed(3)}
             </p>
           </div>
           {/* 当前价格 */}
           <div className="bg-orange-50 rounded-lg p-3 text-center">
             <p className="text-xs text-slate-500 mb-1">当前价格</p>
             <p className="text-xl font-bold text-orange-500">
-              {etf.price.toFixed(3)}
+              {(etf.price ?? 0).toFixed(3)}
             </p>
           </div>
         </div>
@@ -168,11 +168,11 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
         <div className="grid grid-cols-2 gap-2 mb-3">
           <div className="bg-orange-50 rounded-lg p-3">
             <p className="text-xs text-slate-500 mb-1">当前价格</p>
-            <p className="text-xl font-bold text-orange-500">{etf.currentPrice.toFixed(3)}</p>
+            <p className="text-xl font-bold text-orange-500">{(etf.currentPrice ?? 0).toFixed(3)}</p>
           </div>
           <div className="bg-emerald-50 rounded-lg p-3">
             <p className="text-xs text-slate-500 mb-1">ENE下轨</p>
-            <p className="text-xl font-bold text-emerald-600">{etf.lowerBand.toFixed(3)}</p>
+            <p className="text-xl font-bold text-emerald-600">{(etf.lowerBand ?? 0).toFixed(3)}</p>
           </div>
         </div>
 
@@ -180,12 +180,12 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-slate-50 rounded-lg p-3">
             <p className="text-xs text-slate-500 mb-1">10日均线</p>
-            <p className="text-base font-semibold text-slate-700">{etf.ma10.toFixed(3)}</p>
+            <p className="text-base font-semibold text-slate-700">{(etf.ma10 ?? 0).toFixed(3)}</p>
           </div>
           <div className="bg-slate-50 rounded-lg p-3">
             <p className="text-xs text-slate-500 mb-1">距ENE下轨</p>
             <p className={`text-base font-semibold ${isNearLower ? 'text-amber-500' : 'text-slate-700'}`}>
-              {etf.distanceToLower.toFixed(2)}%
+              {(etf.distanceToLower ?? 0).toFixed(2)}%
             </p>
           </div>
         </div>
