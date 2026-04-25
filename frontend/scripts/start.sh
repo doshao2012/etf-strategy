@@ -1,5 +1,7 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-echo "Starting Next.js on 0.0.0.0:5000..."
-HOSTNAME=0.0.0.0 PORT=5000 node .next/standalone/server.js
+PORT="${PORT:-5000}"
+
+echo "Starting Next.js on port ${PORT}..."
+pnpm next start -p ${PORT}
