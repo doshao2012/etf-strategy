@@ -8,7 +8,7 @@
           "nixPkgs": ["nodejs_20", "pnpm"]
         },
         "install": {
-          "cmds": ["pnpm install --frozen-lockfile"]
+          "cmds": ["pnpm install"]
         },
         "build": {
           "cmds": ["pnpm run build"]
