@@ -6,13 +6,13 @@ WORKDIR /app
 RUN apk add --no-cache curl
 
 # 复制依赖文件
-COPY backend/requirements.txt .
+COPY requirements.txt .
 
 # 安装 Python 依赖
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# 复制后端代码
-COPY backend/ .
+# 复制后端代码（context是backend，所以用.）
+COPY . .
 
 # 暴露端口
 EXPOSE 3000
