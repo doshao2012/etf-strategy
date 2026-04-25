@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from 'next';
-import { Inspector } from 'react-dev-inspector';
 import './globals.css';
 
 export const viewport: Viewport = {
@@ -71,12 +70,9 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const isDev = process.env.COZE_PROJECT_ENV === 'DEV';
-
   return (
     <html lang="en">
       <body className={`antialiased`}>
-        {isDev && <Inspector />}
         {children}
       </body>
     </html>
