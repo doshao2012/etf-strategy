@@ -1,5 +1,5 @@
-#!/bin/bash
-set -Eeuo pipefail
+#!/bin/sh
+set -e
 
 COZE_WORKSPACE_PATH="${COZE_WORKSPACE_PATH:-$(pwd)}"
 
