@@ -4,8 +4,8 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
-// API 基础 URL - 从环境变量读取
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+// API 基础 URL - 从环境变量读取，移除尾随斜杠
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
 
 // GET - 获取所有ETF配置
 export async function GET() {
