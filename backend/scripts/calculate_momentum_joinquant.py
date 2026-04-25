@@ -68,7 +68,7 @@ def get_historical_prices(market, code, days=30):
     cached_data = cache.get(cache_key)
     
     if cached_data and cached_data.get('date') == today:
-        print(f"使用缓存的历史数据: {code}")
+        print(f"使用缓存的历史数据: {code}", file=sys.stderr)
         data = cached_data.get('data', [])
         return [{'close': float(item['close'])} for item in data[-days:]]
     
