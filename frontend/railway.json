@@ -3,9 +3,15 @@
   "build": {
     "builder": "NIXPACKS",
     "nixpacksPlan": {
+      "env": {
+        "NODE_VERSION": "20"
+      },
       "phases": {
         "install": {
-          "cmds": ["npm install -g pnpm@9 && pnpm install --force"]
+          "cmds": ["npm install -g pnpm@9", "pnpm install --force"]
+        },
+        "build": {
+          "cmds": ["pnpm run build"]
         }
       }
     }
