@@ -33,7 +33,7 @@ def log(message: str):
     """打印日志（仅在VERBOSE模式下）"""
     if VERBOSE:
         if not is_quiet:
-                    print(message)
+                    print(message, file=sys.stderr)
 
 
 def get_all_etf_list() -> List[Dict]:
@@ -374,20 +374,20 @@ if __name__ == '__main__':
     
     if not is_quiet:
         if not is_quiet:
-                    print("ETF超跌策略分析")
+                    print("ETF超跌策略分析", file=sys.stderr)
         if not is_quiet:
-                    print("=" * 60)
+                    print("=" * 60, file=sys.stderr)
     
     # 第一步：获取所有ETF列表
     if not is_quiet:
-            print("\n第一步：获取所有场内ETF列表")
+            print("\n第一步：获取所有场内ETF列表", file=sys.stderr)
     all_etfs = get_all_etf_list()
     if not is_quiet:
-            print(f"获取到 {len(all_etfs)} 只ETF")
+            print(f"获取到 {len(all_etfs)} 只ETF", file=sys.stderr)
     
     # 第二步：筛选高流动性ETF
     if not is_quiet:
-            print("\n第二步：筛选高流动性ETF（成交额 > 1亿）")
+            print("\n第二步：筛选高流动性ETF（成交额 > 1亿）", file=sys.stderr)
     filtered_etfs = []
     for etf in all_etfs:
         volume = get_etf_volume(etf['code'], etf['market'])
@@ -395,18 +395,18 @@ if __name__ == '__main__':
             etf['volume'] = volume
             filtered_etfs.append(etf)
     if not is_quiet:
-            print(f"筛选后剩余 {len(filtered_etfs)} 只ETF")
+            print(f"筛选后剩余 {len(filtered_etfs)} 只ETF", file=sys.stderr)
     
     # 第三步：合并同类ETF
     if not is_quiet:
-            print("\n第三步：合并同类ETF")
+            print("\n第三步：合并同类ETF", file=sys.stderr)
     merged_etfs = merge_duplicate_etfs(filtered_etfs)
     if not is_quiet:
-            print(f"合并后剩余 {len(merged_etfs)} 只ETF")
+            print(f"合并后剩余 {len(merged_etfs)} 只ETF", file=sys.stderr)
     
     # 第四步：计算超跌分析
     if not is_quiet:
-            print("\n第四步：计算超跌分析")
+            print("\n第四步：计算超跌分析", file=sys.stderr)
     oversold_etfs = calculate_oversold_analysis(merged_etfs)
     
     # 输出结果
@@ -425,13 +425,13 @@ if __name__ == '__main__':
         print(json.dumps(result, ensure_ascii=False))
     else:
         if not is_quiet:
-                    print(f"\n成功分析 {len(oversold_etfs)} 只ETF")
+                    print(f"\n成功分析 {len(oversold_etfs)} 只ETF", file=sys.stderr)
         if not is_quiet:
-                    print("\nTop 10 超跌ETF:")
+                    print("\nTop 10 超跌ETF:", file=sys.stderr)
         for i, etf in enumerate(oversold_etfs[:10]):
             if not is_quiet:
-                            print(f"{i+1}. {etf['name']} ({etf['code']})")
+                            print(f"{i+1}. {etf['name']} ({etf['code']})", file=sys.stderr)
             if not is_quiet:
-                            print(f"   当前价: {etf['current_price']}, MA10: {etf['ma10']}")
+                            print(f"   当前价: {etf['current_price']}, MA10: {etf['ma10']}", file=sys.stderr)
             if not is_quiet:
-                            print(f"   ENE下轨: {etf['lower_band']}, 距离下轨: {etf['dist_to_lower']}%")
+                            print(f"   ENE下轨: {etf['lower_band']}, 距离下轨: {etf['dist_to_lower']}%", file=sys.stderr)
