@@ -409,29 +409,16 @@ if __name__ == '__main__':
             print("\n第四步：计算超跌分析", file=sys.stderr)
     oversold_etfs = calculate_oversold_analysis(merged_etfs)
     
-    # 输出结果
-    if is_quiet:
-        result = {
-            'code': 200,
-            'msg': 'success',
-            'data': {
-                'summary': {
-                    'total': len(merged_etfs),
-                    'analyzed': len(oversold_etfs)
-                },
-                'etfs': oversold_etfs[:10]
-            }
+    # 输出结果（始终输出JSON）
+    result = {
+        'code': 200,
+        'msg': 'success',
+        'data': {
+            'summary': {
+                'total': len(merged_etfs),
+                'analyzed': len(oversold_etfs)
+            },
+            'etfs': oversold_etfs[:10]
         }
-        print(json.dumps(result, ensure_ascii=False))
-    else:
-        if not is_quiet:
-                    print(f"\n成功分析 {len(oversold_etfs)} 只ETF", file=sys.stderr)
-        if not is_quiet:
-                    print("\nTop 10 超跌ETF:", file=sys.stderr)
-        for i, etf in enumerate(oversold_etfs[:10]):
-            if not is_quiet:
-                            print(f"{i+1}. {etf['name']} ({etf['code']})", file=sys.stderr)
-            if not is_quiet:
-                            print(f"   当前价: {etf['current_price']}, MA10: {etf['ma10']}", file=sys.stderr)
-            if not is_quiet:
-                            print(f"   ENE下轨: {etf['lower_band']}, 距离下轨: {etf['dist_to_lower']}%", file=sys.stderr)
+    }
+    print(json.dumps(result, ensure_ascii=False))
