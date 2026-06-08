@@ -119,9 +119,10 @@ def load_config():
                 if data[-1].get('day', '').startswith(today_str):
                     # 最后一条已经是今天 → 替换为实时价格（盘后修正 / 盘中刷新）
                     data[-1]['close'] = current
-                else:
-                    # 最后一条不是今天 → 追加实时价格
+                elif abs(current - data[-1]['close']) > 0.001:
+                    # 最后一条不是今天，且价格有变动 → 追加实时价格（新交易日）
                     data.append({'day': today_str, 'close': current})
+                # 否则：节假日价格不变 → 不追加，保持数据纯净
             
             if data:
                 etfs[code] = {
