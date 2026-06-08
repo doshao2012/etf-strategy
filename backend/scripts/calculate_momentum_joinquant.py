@@ -70,10 +70,7 @@ def get_historical_prices(market, code, days=30):
     if cached_data and cached_data.get('date') == today:
         print(f"使用缓存的历史数据: {code}", file=sys.stderr)
         data = cached_data.get('data', [])
-        # 排除今天的数据（load_config 会追加实时价格，避免重复）
-        if data and data[-1].get('day', '').startswith(today):
-            data = data[:-1]
-        return [{'close': float(item['close'])} for item in data[-days:]]
+        return [{'day': item['day'], 'close': float(item['close'])} for item in data[-days:]]
     
     # 从新浪获取历史数据
     try:
@@ -93,11 +90,8 @@ def get_historical_prices(market, code, days=30):
         cache[cache_key] = {'date': today, 'data': data}
         save_history_cache(cache)
         
-        # 排除今天的数据（load_config 会追加实时价格，避免重复）
-        if data and data[-1].get('day', '').startswith(today):
-            data = data[:-1]
-        # 返回指定天数的数据
-        return [{'close': float(item['close'])} for item in data[-days:]]
+        # 返回指定天数的数据（含 day 字段，供 load_config 判断今天）
+        return [{'day': item['day'], 'close': float(item['close'])} for item in data[-days:]]
         
     except Exception as e:
         print(f"获取历史数据失败: {e}", file=sys.stderr)
@@ -118,10 +112,16 @@ def load_config():
             # 获取历史数据
             data = get_historical_prices(market, code, 30)
             
-            # 获取实时价格并追加
+            # 获取实时价格
             current, today_pct = get_realtime_price(market, code)
             if current and current > 0 and data:
-                data.append({'close': current})
+                today_str = datetime.now().strftime('%Y-%m-%d')
+                if data[-1].get('day', '').startswith(today_str):
+                    # 最后一条已经是今天 → 替换为实时价格（盘后修正 / 盘中刷新）
+                    data[-1]['close'] = current
+                else:
+                    # 最后一条不是今天 → 追加实时价格
+                    data.append({'day': today_str, 'close': current})
             
             if data:
                 etfs[code] = {
