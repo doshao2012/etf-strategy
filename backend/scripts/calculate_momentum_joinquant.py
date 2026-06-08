@@ -173,6 +173,8 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
     Returns:
         dict: 包含动量得分、稳定性、价格、涨跌幅、状态等
     """
+    from datetime import date
+    today_str = date.today().isoformat()
     try:
         data = etf_info['data']
         if len(data) < lookback_days + 1:
@@ -230,14 +232,14 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         raw_key = f'{market}_{etf_info["code"]}'
         raw_data = _raw_history_data.get(raw_key, [])
         if len(raw_data) >= 20:
-            # 用完整数据算均线
-            raw_closes = [float(d['close']) for d in raw_data]
+            # 用完整数据算均线，去掉最后一条（今天），用实时价格替代
+            raw_closes = [float(d['close']) for d in raw_data[:-1]] if raw_data[-1]['day'].startswith(today_str) else [float(d['close']) for d in raw_data]
             all_closes = raw_closes + [current_price]  # 加上今天实时价格
             ma10 = float(np.mean(all_closes[-10:])) if len(all_closes) >= 10 else None
             ma20 = float(np.mean(all_closes[-20:])) if len(all_closes) >= 20 else None
         else:
-            # 降级：用data（30条日K）
-            all_closes = [d['close'] for d in data]
+            # 降级：用data（30条日K），去掉最后一条（今天），用实时价格替代
+            all_closes = [d['close'] for d in data[:-1]] if data[-1]['day'].startswith(today_str) else [d['close'] for d in data]
             all_closes_with_today = all_closes + [current_price]
             ma10 = float(np.mean(all_closes_with_today[-10:])) if len(all_closes_with_today) >= 10 else None
             ma20 = float(np.mean(all_closes_with_today[-20:])) if len(all_closes_with_today) >= 20 else None
