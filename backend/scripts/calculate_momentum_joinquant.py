@@ -16,7 +16,6 @@ from datetime import datetime, timedelta
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), '..', 'etf_config.json')
 # 历史数据缓存文件
 HISTORY_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'history_cache.json')
-_raw_history_data = {}  # 保存原始4小时K线数据供均线计算
 
 def get_realtime_price(market, code):
     """获取实时价格（不缓存，每次都获取最新）"""
@@ -60,8 +59,7 @@ def save_history_cache(cache):
         print(f"保存历史缓存失败: {e}", file=sys.stderr)
 
 def get_historical_prices(market, code, days=30):
-    """获取历史K线数据（按天缓存），同时保存原始数据供均线计算使用"""
-    global _raw_history_data
+    """获取历史K线数据（按天缓存）"""
     today = datetime.now().strftime('%Y-%m-%d')
     cache_key = f"{market}_{code}"
     
@@ -72,13 +70,11 @@ def get_historical_prices(market, code, days=30):
     if cached_data and cached_data.get('date') == today:
         print(f"使用缓存的历史数据: {code}", file=sys.stderr)
         data = cached_data.get('data', [])
-        # 保存原始数据供均线计算
-        _raw_history_data[cache_key] = data
         return [{'close': float(item['close'])} for item in data[-days:]]
     
     # 从新浪获取历史数据
     try:
-        url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={market}{code}&scale=240&ma=no&datalen=150"
+        url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={market}{code}&scale=240&ma=no&datalen={days+30}"
         
         response = requests.get(url, timeout=15)
         content = response.text
@@ -94,38 +90,11 @@ def get_historical_prices(market, code, days=30):
         cache[cache_key] = {'date': today, 'data': data}
         save_history_cache(cache)
         
-        # 保存原始数据供均线计算
-        _raw_history_data[cache_key] = data
-        
         # 返回指定天数的数据
         return [{'close': float(item['close'])} for item in data[-days:]]
         
     except Exception as e:
         print(f"获取历史数据失败: {e}", file=sys.stderr)
-        return []
-
-def get_daily_prices_from_cache(data_4h, days=25):
-    """从4小时K线缓存数据按天聚合为日K线，用于均线计算"""
-    try:
-        if not data_4h:
-            return []
-        
-        # 按天聚合，取每天最后一条的收盘价
-        daily_prices = {}
-        for item in data_4h:
-            if isinstance(item, dict) and 'day' in item:
-                day = item['day'][:10]  # 只取日期部分
-                daily_prices[day] = float(item['close'])
-            elif isinstance(item, (int, float)):
-                # 纯收盘价列表，无法按天聚合
-                return []
-        
-        # 按日期排序
-        days_sorted = sorted(daily_prices.keys())
-        return [daily_prices[d] for d in days_sorted[-days:]]
-        
-    except Exception as e:
-        print(f"聚合日K线数据失败: {e}", file=sys.stderr)
         return []
 
 def load_config():
@@ -152,7 +121,6 @@ def load_config():
                 etfs[code] = {
                     'code': code,
                     'name': name,
-                    'market': market,
                     'data': data,
                     'today_pct': today_pct
                 }
@@ -174,8 +142,6 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
     Returns:
         dict: 包含动量得分、稳定性、价格、涨跌幅、状态等
     """
-    from datetime import date
-    today_str = date.today().isoformat()
     try:
         data = etf_info['data']
         if len(data) < lookback_days + 1:
@@ -227,28 +193,6 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         estimated_prices = np.append(prices[1:], current_price)
         estimated_score, _, _, _ = calculate_momentum(estimated_prices)
 
-        # 3. 均线计算（使用完整的150条日K数据）
-        # 从_raw_history_data获取完整数据，不够则用data（30条）
-        market = etf_info.get('market', 'sz')
-        raw_key = f'{market}_{etf_info["code"]}'
-        raw_data = _raw_history_data.get(raw_key, [])
-        if len(raw_data) >= 20:
-            # 用完整数据算均线，去掉最后一条（今天），用实时价格替代
-            raw_closes = [float(d['close']) for d in raw_data[:-1]] if raw_data[-1]['day'].startswith(today_str) else [float(d['close']) for d in raw_data]
-            all_closes = raw_closes + [current_price]  # 加上今天实时价格
-            ma10 = float(np.mean(all_closes[-10:])) if len(all_closes) >= 10 else None
-            ma20 = float(np.mean(all_closes[-20:])) if len(all_closes) >= 20 else None
-        else:
-            # 降级：用data（30条日K），只有close字段，无day字段
-            # data最后一条可能是今天实时价格（append的），倒数第二条开始取
-            # 去掉最后一条（今天实时价格），其余作为历史收盘价
-            all_closes = [d['close'] for d in data[:-1]]
-            all_closes_with_today = all_closes + [current_price]
-            ma10 = float(np.mean(all_closes_with_today[-10:])) if len(all_closes_with_today) >= 10 else None
-            ma20 = float(np.mean(all_closes_with_today[-20:])) if len(all_closes_with_today) >= 20 else None
-        below_ma10 = bool(ma10 is not None and current_price < ma10)
-        below_ma20 = bool(ma20 is not None and current_price < ma20)
-
         return {
             'code': etf_info['code'],
             'name': etf_info['name'],
@@ -259,11 +203,7 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
             'today_pct': round(today_pct, 2),
             'status': status,
             'ann_return': round(ann_return, 4),
-            'slope': round(slope, 6),
-            'ma10': round(ma10, 3) if ma10 is not None else None,
-            'ma20': round(ma20, 3) if ma20 is not None else None,
-            'below_ma10': below_ma10,
-            'below_ma20': below_ma20
+            'slope': round(slope, 6)
         }
     except Exception as e:
         import traceback
