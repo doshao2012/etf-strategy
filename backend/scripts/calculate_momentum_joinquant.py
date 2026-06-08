@@ -224,12 +224,23 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         estimated_prices = np.append(prices[1:], current_price)
         estimated_score, _, _, _ = calculate_momentum(estimated_prices)
 
-        # 3. 均线计算（data是日K线，scale=240即日K）
-        # data包含150个交易日数据，取最后10/20个算均线
-        all_closes = [d['close'] for d in data]
-        all_closes_with_today = all_closes + [current_price]  # 加上今天实时价格
-        ma10 = float(np.mean(all_closes_with_today[-10:])) if len(all_closes_with_today) >= 10 else None
-        ma20 = float(np.mean(all_closes_with_today[-20:])) if len(all_closes_with_today) >= 20 else None
+        # 3. 均线计算（使用完整的150条日K数据）
+        # 从_raw_history_data获取完整数据，不够则用data（30条）
+        market = etf_info.get('market', 'sz')
+        raw_key = f'{market}_{etf_info["code"]}'
+        raw_data = _raw_history_data.get(raw_key, [])
+        if len(raw_data) >= 20:
+            # 用完整数据算均线
+            raw_closes = [float(d['close']) for d in raw_data]
+            all_closes = raw_closes + [current_price]  # 加上今天实时价格
+            ma10 = float(np.mean(all_closes[-10:])) if len(all_closes) >= 10 else None
+            ma20 = float(np.mean(all_closes[-20:])) if len(all_closes) >= 20 else None
+        else:
+            # 降级：用data（30条日K）
+            all_closes = [d['close'] for d in data]
+            all_closes_with_today = all_closes + [current_price]
+            ma10 = float(np.mean(all_closes_with_today[-10:])) if len(all_closes_with_today) >= 10 else None
+            ma20 = float(np.mean(all_closes_with_today[-20:])) if len(all_closes_with_today) >= 20 else None
         below_ma10 = bool(ma10 is not None and current_price < ma10)
         below_ma20 = bool(ma20 is not None and current_price < ma20)
 
