@@ -209,8 +209,13 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
               <div className={`rounded-lg p-2 text-center ${etf.atrAlarm ? 'bg-red-50 ring-1 ring-red-300' : 'bg-slate-50'}`}>
                 <p className="text-xs text-slate-500 mb-1">2倍ATR支撑</p>
                 <p className="text-sm font-semibold text-slate-700">{etf.atrTwoSupport?.toFixed(3)}</p>
-                {etf.atrAlarm && (
-                  <p className="text-xs font-medium text-red-600 mt-0.5">⚠️ 已跌破</p>
+                {etf.atrDistance !== null && (
+                  <p className={`text-xs font-medium mt-0.5 ${etf.atrAlarm ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {etf.atrAlarm ? '⚠️ 已跌破' : '↗ 支撑上'}{' '}
+                    <span className={etf.atrAlarm ? 'text-red-500' : 'text-emerald-500'}>
+                      {etf.atrDistance >= 0 ? '+' : ''}{etf.atrDistance.toFixed(2)}%
+                    </span>
+                  </p>
                 )}
               </div>
             </div>
@@ -631,31 +636,51 @@ export default function ETFRotationPage() {
           <>
             {/* 汇总信息 */}
             <Card className="mb-4 bg-white border border-slate-200 shadow-sm">
-              <CardContent className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Shield className="w-5 h-5 text-emerald-500" />
-                  <span className="text-sm font-medium text-slate-700">
-                    建议持仓
-                  </span>
-                  <span className="text-sm font-bold text-emerald-600">
-                    {(() => {
-                      // 趋势轮动：找状态正常且排名第一的
-                      if (!isOversoldMode && rotationData?.data.etfs) {
-                        const normalEtf = rotationData.data.etfs.find((etf, idx) => 
-                          idx === 0 && etf.status === '正常'
-                        );
-                        return normalEtf ? normalEtf.name : '空仓';
-                      }
-                      // 超跌策略：使用第一个推荐
-                      return isOversoldMode 
-                        ? (oversoldData?.data.recommend?.[0] || '空仓')
-                        : '空仓';
-                    })()}
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-emerald-500" />
+                    <span className="text-sm font-medium text-slate-700">
+                      建议持仓
+                    </span>
+                    <span className="text-sm font-bold text-emerald-600">
+                      {(() => {
+                        // 趋势轮动：找状态正常且排名第一的
+                        if (!isOversoldMode && rotationData?.data.etfs) {
+                          const normalEtf = rotationData.data.etfs.find((etf, idx) => 
+                            idx === 0 && etf.status === '正常'
+                          );
+                          return normalEtf ? normalEtf.name : '空仓';
+                        }
+                        // 超跌策略：使用第一个推荐
+                        return isOversoldMode 
+                          ? (oversoldData?.data.recommend?.[0] || '空仓')
+                          : '空仓';
+                      })()}
+                    </span>
+                  </div>
+                  <span className="text-xs text-slate-400">
+                    更新时间: {lastUpdate}
                   </span>
                 </div>
-                <span className="text-xs text-slate-400">
-                  更新时间: {lastUpdate}
-                </span>
+                {/* 规则说明 */}
+                <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1">
+                  <p className="font-medium text-slate-700 mb-1">操作规则：</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="bg-red-50 rounded p-2">
+                      <p className="font-medium text-red-600 text-xs">清仓</p>
+                      <p className="text-slate-500 text-[11px] leading-relaxed">当日大跌、跌破20日线、<br/>分数不是第一、ATR止盈</p>
+                    </div>
+                    <div className="bg-amber-50 rounded p-2">
+                      <p className="font-medium text-amber-600 text-xs">减仓</p>
+                      <p className="text-slate-500 text-[11px] leading-relaxed">跌破10日线、ENE上限</p>
+                    </div>
+                    <div className="bg-blue-50 rounded p-2">
+                      <p className="font-medium text-blue-600 text-xs">分数上限</p>
+                      <p className="text-slate-500 text-[11px] leading-relaxed">保守选择3以下，<br/>按照95%上限</p>
+                    </div>
+                  </div>
+                </div>
               </CardContent>
             </Card>
 
