@@ -34,6 +34,11 @@ interface RotationETF {
   eneDistLower: number | null;
   eneWarnUpper: boolean;
   eneWarnLower: boolean;
+  atr20: number | null;
+  fiveDayHigh: number | null;
+  atrTwoSupport: number | null;
+  atrDistance: number | null;
+  atrAlarm: boolean;
 }
 
 // 超跌策略ETF数据
@@ -188,6 +193,29 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
             </div>
           </div>
         </div>
+
+        {/* ATR 风控 */}
+        {etf.atr20 !== null && (
+          <div className="border-t border-slate-100 pt-2 mt-2">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="rounded-lg bg-slate-50 p-2 text-center">
+                <p className="text-xs text-slate-500 mb-1">ATR20</p>
+                <p className="text-sm font-semibold text-slate-700">{etf.atr20.toFixed(4)}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-2 text-center">
+                <p className="text-xs text-slate-500 mb-1">5日最高</p>
+                <p className="text-sm font-semibold text-slate-700">{etf.fiveDayHigh?.toFixed(3)}</p>
+              </div>
+              <div className={`rounded-lg p-2 text-center ${etf.atrAlarm ? 'bg-red-50 ring-1 ring-red-300' : 'bg-slate-50'}`}>
+                <p className="text-xs text-slate-500 mb-1">2倍ATR支撑</p>
+                <p className="text-sm font-semibold text-slate-700">{etf.atrTwoSupport?.toFixed(3)}</p>
+                {etf.atrAlarm && (
+                  <p className="text-xs font-medium text-red-600 mt-0.5">⚠️ 已跌破</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

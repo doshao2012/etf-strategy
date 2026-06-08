@@ -38,6 +38,11 @@ export async function GET() {
       eneDistLower: etf.ene_dist_lower ?? null,
       eneWarnUpper: etf.ene_warn_upper ?? false,
       eneWarnLower: etf.ene_warn_lower ?? false,
+      atr20: etf.atr20 ?? null,
+      fiveDayHigh: etf.five_day_high ?? null,
+      atrTwoSupport: etf.atr_two_support ?? null,
+      atrDistance: etf.atr_distance ?? null,
+      atrAlarm: etf.atr_alarm ?? false,
     }));
 
     // 推荐标的（返回完整对象包含预估得分）

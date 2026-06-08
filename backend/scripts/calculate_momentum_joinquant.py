@@ -18,7 +18,7 @@ CONFIG_FILE = os.path.join(os.path.dirname(__file__), '..', 'etf_config.json')
 HISTORY_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'history_cache.json')
 
 def get_realtime_price(market, code):
-    """获取实时价格（不缓存，每次都获取最新）"""
+    """获取实时价格及今日最高/最低价（不缓存，每次都获取最新）"""
     try:
         url = f"https://qt.gtimg.cn/q={market}{code}"
         response = requests.get(url, timeout=5)
@@ -26,19 +26,21 @@ def get_realtime_price(market, code):
         
         match = re.search(f'v_{market}{code}="([^"]+)"', content)
         if not match:
-            return None, None
+            return None, None, None, None
         
         data_str = match.group(1)
         fields = data_str.split('~')
         
         current = float(fields[3]) if fields[3] else 0
         pre_close = float(fields[4]) if fields[4] else 0
-        change_pct = float(fields[12]) if fields[12] else 0
+        change_pct = float(fields[32]) if len(fields) > 32 and fields[32] else 0
+        today_high = float(fields[33]) if len(fields) > 33 and fields[33] else current
+        today_low = float(fields[34]) if len(fields) > 34 and fields[34] else current
         
-        return current, change_pct
+        return current, change_pct, today_high, today_low
     except Exception as e:
         print(f"获取实时价格失败: {e}", file=sys.stderr)
-        return None, None
+        return None, None, None, None
 
 def load_history_cache():
     """加载历史数据缓存"""
@@ -70,7 +72,7 @@ def get_historical_prices(market, code, days=30):
     if cached_data and cached_data.get('date') == today:
         print(f"使用缓存的历史数据: {code}", file=sys.stderr)
         data = cached_data.get('data', [])
-        return [{'day': item['day'], 'close': float(item['close'])} for item in data[-days:]]
+        return [{'day': item['day'], 'close': float(item['close']), 'high': float(item['high']), 'low': float(item['low'])} for item in data[-days:]]
     
     # 从新浪获取历史数据
     try:
@@ -90,8 +92,8 @@ def get_historical_prices(market, code, days=30):
         cache[cache_key] = {'date': today, 'data': data}
         save_history_cache(cache)
         
-        # 返回指定天数的数据（含 day 字段，供 load_config 判断今天）
-        return [{'day': item['day'], 'close': float(item['close'])} for item in data[-days:]]
+        # 返回指定天数的数据（含 day、high、low 字段）
+        return [{'day': item['day'], 'close': float(item['close']), 'high': float(item['high']), 'low': float(item['low'])} for item in data[-days:]]
         
     except Exception as e:
         print(f"获取历史数据失败: {e}", file=sys.stderr)
@@ -112,16 +114,20 @@ def load_config():
             # 获取历史数据
             data = get_historical_prices(market, code, 30)
             
-            # 获取实时价格
-            current, today_pct = get_realtime_price(market, code)
+            # 获取实时价格（含今日高/低价）
+            current, today_pct, today_high, today_low = get_realtime_price(market, code)
             if current and current > 0 and data:
                 today_str = datetime.now().strftime('%Y-%m-%d')
                 if data[-1].get('day', '').startswith(today_str):
-                    # 最后一条已经是今天 → 替换为实时价格（盘后修正 / 盘中刷新）
+                    # 最后一条已经是今天 → 替换为实时数据（盘后修正 / 盘中刷新）
                     data[-1]['close'] = current
+                    data[-1]['high'] = max(data[-1]['high'], today_high) if today_high else data[-1]['high']
+                    data[-1]['low'] = min(data[-1]['low'], today_low) if today_low else data[-1]['low']
                 elif abs(current - data[-1]['close']) > 0.001:
-                    # 最后一条不是今天，且价格有变动 → 追加实时价格（新交易日）
-                    data.append({'day': today_str, 'close': current})
+                    # 最后一条不是今天，且价格有变动 → 追加实时数据（新交易日）
+                    data.append({'day': today_str, 'close': current,
+                                 'high': today_high or current,
+                                 'low': today_low or current})
                 # 否则：节假日价格不变 → 不追加，保持数据纯净
             
             if data:
@@ -219,6 +225,28 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
             ene_upper = ene_lower = ene_dist_upper = ene_dist_lower = None
             ene_warn_upper = ene_warn_lower = False
 
+        # 7. ATR20 & 5日最高价距2倍ATR
+        atr20 = None
+        atr_two_support = None
+        atr_distance = None
+        atr_alarm = False
+        five_day_high = None
+        if len(data) >= 21 and all('high' in d and 'low' in d for d in data):
+            tr_values = []
+            for i in range(1, len(data)):
+                h = data[i]['high']
+                l = data[i]['low']
+                pc = data[i-1]['close']
+                tr = max(h - l, abs(h - pc), abs(l - pc))
+                tr_values.append(tr)
+            if len(tr_values) >= 20:
+                atr20 = round(float(np.mean(tr_values[-20:])), 4)
+                highs_5 = [d['high'] for d in data[-5:]]
+                five_day_high = round(max(highs_5), 3)
+                atr_two_support = round(five_day_high - 2 * atr20, 3)
+                atr_distance = round((current_price - atr_two_support) / current_price * 100, 2)
+                atr_alarm = bool(current_price < atr_two_support)
+
         return {
             'code': etf_info['code'],
             'name': etf_info['name'],
@@ -239,7 +267,12 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
             'ene_dist_upper': ene_dist_upper,
             'ene_dist_lower': ene_dist_lower,
             'ene_warn_upper': bool(ene_warn_upper),
-            'ene_warn_lower': bool(ene_warn_lower)
+            'ene_warn_lower': bool(ene_warn_lower),
+            'atr20': atr20,
+            'five_day_high': five_day_high,
+            'atr_two_support': atr_two_support,
+            'atr_distance': atr_distance,
+            'atr_alarm': bool(atr_alarm)
         }
     except Exception as e:
         import traceback
