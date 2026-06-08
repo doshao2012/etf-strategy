@@ -669,15 +669,21 @@ export default function ETFRotationPage() {
                   <div className="grid grid-cols-3 gap-2">
                     <div className="bg-red-50 rounded p-2">
                       <p className="font-medium text-red-600 text-xs">清仓</p>
-                      <p className="text-slate-500 text-[11px] leading-relaxed">当日大跌、跌破20日线、<br/>分数不是第一、ATR止盈</p>
+                      <p className="text-slate-500 text-[11px] leading-relaxed">
+  当日大跌<br/>跌破20日线<br/>分数不是第一<br/>ATR止盈
+</p>
                     </div>
                     <div className="bg-amber-50 rounded p-2">
                       <p className="font-medium text-amber-600 text-xs">减仓</p>
-                      <p className="text-slate-500 text-[11px] leading-relaxed">跌破10日线、ENE上限</p>
+                      <p className="text-slate-500 text-[11px] leading-relaxed">
+  跌破10日线<br/>ENE上限
+</p>
                     </div>
                     <div className="bg-blue-50 rounded p-2">
                       <p className="font-medium text-blue-600 text-xs">分数上限</p>
-                      <p className="text-slate-500 text-[11px] leading-relaxed">保守选择3以下，<br/>按照95%上限</p>
+                      <p className="text-slate-500 text-[11px] leading-relaxed">
+  保守选择3<br/>按照95%上限
+</p>
                     </div>
                   </div>
                 </div>
