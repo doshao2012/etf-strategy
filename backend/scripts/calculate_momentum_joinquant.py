@@ -70,6 +70,9 @@ def get_historical_prices(market, code, days=30):
     if cached_data and cached_data.get('date') == today:
         print(f"使用缓存的历史数据: {code}", file=sys.stderr)
         data = cached_data.get('data', [])
+        # 排除今天的数据（load_config 会追加实时价格，避免重复）
+        if data and data[-1].get('day', '').startswith(today):
+            data = data[:-1]
         return [{'close': float(item['close'])} for item in data[-days:]]
     
     # 从新浪获取历史数据
@@ -90,6 +93,9 @@ def get_historical_prices(market, code, days=30):
         cache[cache_key] = {'date': today, 'data': data}
         save_history_cache(cache)
         
+        # 排除今天的数据（load_config 会追加实时价格，避免重复）
+        if data and data[-1].get('day', '').startswith(today):
+            data = data[:-1]
         # 返回指定天数的数据
         return [{'close': float(item['close'])} for item in data[-days:]]
         
