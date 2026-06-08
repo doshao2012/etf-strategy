@@ -152,6 +152,7 @@ def load_config():
                 etfs[code] = {
                     'code': code,
                     'name': name,
+                    'market': market,
                     'data': data,
                     'today_pct': today_pct
                 }
@@ -238,8 +239,10 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
             ma10 = float(np.mean(all_closes[-10:])) if len(all_closes) >= 10 else None
             ma20 = float(np.mean(all_closes[-20:])) if len(all_closes) >= 20 else None
         else:
-            # 降级：用data（30条日K），去掉最后一条（今天），用实时价格替代
-            all_closes = [d['close'] for d in data[:-1]] if data[-1]['day'].startswith(today_str) else [d['close'] for d in data]
+            # 降级：用data（30条日K），只有close字段，无day字段
+            # data最后一条可能是今天实时价格（append的），倒数第二条开始取
+            # 去掉最后一条（今天实时价格），其余作为历史收盘价
+            all_closes = [d['close'] for d in data[:-1]]
             all_closes_with_today = all_closes + [current_price]
             ma10 = float(np.mean(all_closes_with_today[-10:])) if len(all_closes_with_today) >= 10 else None
             ma20 = float(np.mean(all_closes_with_today[-20:])) if len(all_closes_with_today) >= 20 else None
