@@ -32,6 +32,12 @@ export async function GET() {
       ma20: etf.ma20 ?? null,
       belowMa10: etf.below_ma10 ?? false,
       belowMa20: etf.below_ma20 ?? false,
+      eneUpper: etf.ene_upper ?? null,
+      eneLower: etf.ene_lower ?? null,
+      eneDistUpper: etf.ene_dist_upper ?? null,
+      eneDistLower: etf.ene_dist_lower ?? null,
+      eneWarnUpper: etf.ene_warn_upper ?? false,
+      eneWarnLower: etf.ene_warn_lower ?? false,
     }));
 
     // 推荐标的（返回完整对象包含预估得分）

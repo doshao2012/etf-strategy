@@ -205,6 +205,19 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         ma10 = float(np.mean(all_closes[-10:])) if len(all_closes) >= 10 else None
         ma20 = float(np.mean(all_closes[-20:])) if len(all_closes) >= 20 else None
 
+        # 5. ENE 轨道 (11, 10, 9)
+        ma11 = float(np.mean(all_closes[-11:])) if len(all_closes) >= 11 else None
+        if ma11 is not None:
+            ene_upper = round(ma11 * 1.10, 3)
+            ene_lower = round(ma11 * 0.91, 3)
+            ene_dist_upper = round((ene_upper - current_price) / current_price * 100, 2)
+            ene_dist_lower = round((current_price - ene_lower) / current_price * 100, 2)
+            ene_warn_upper = ene_dist_upper <= 1.0
+            ene_warn_lower = ene_dist_lower <= 1.0
+        else:
+            ene_upper = ene_lower = ene_dist_upper = ene_dist_lower = None
+            ene_warn_upper = ene_warn_lower = False
+
         return {
             'code': etf_info['code'],
             'name': etf_info['name'],
@@ -219,7 +232,13 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
             'ma10': round(ma10, 3) if ma10 is not None else None,
             'ma20': round(ma20, 3) if ma20 is not None else None,
             'below_ma10': bool(ma10 is not None and current_price < ma10),
-            'below_ma20': bool(ma20 is not None and current_price < ma20)
+            'below_ma20': bool(ma20 is not None and current_price < ma20),
+            'ene_upper': ene_upper,
+            'ene_lower': ene_lower,
+            'ene_dist_upper': ene_dist_upper,
+            'ene_dist_lower': ene_dist_lower,
+            'ene_warn_upper': bool(ene_warn_upper),
+            'ene_warn_lower': bool(ene_warn_lower)
         }
     except Exception as e:
         import traceback

@@ -28,6 +28,12 @@ interface RotationETF {
   ma20: number | null;
   belowMa10: boolean;
   belowMa20: boolean;
+  eneUpper: number | null;
+  eneLower: number | null;
+  eneDistUpper: number | null;
+  eneDistLower: number | null;
+  eneWarnUpper: boolean;
+  eneWarnLower: boolean;
 }
 
 // 超跌策略ETF数据
@@ -150,6 +156,36 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
               {etf.ma20 != null ? etf.ma20.toFixed(3) : '-'}
             </span>
             {etf.belowMa20 && <span className="text-red-400">⚠️ 低于MA20</span>}
+          </div>
+        </div>
+
+        {/* ENE 轨道 */}
+        <div className="mt-2 pt-2 border-t border-slate-100">
+          <div className="grid grid-cols-2 gap-2">
+            <div className={`rounded-lg p-2 text-center ${etf.eneWarnUpper ? 'bg-red-50 ring-1 ring-red-300' : 'bg-slate-50'}`}>
+              <p className="text-xs text-slate-500 mb-1">ENE上轨</p>
+              <p className="text-base font-bold text-red-500">
+                {etf.eneUpper != null ? etf.eneUpper.toFixed(3) : '-'}
+              </p>
+              {etf.eneDistUpper != null && (
+                <p className={`text-xs font-medium mt-0.5 ${etf.eneWarnUpper ? 'text-red-500' : 'text-slate-400'}`}>
+                  距上轨 {etf.eneDistUpper > 0 ? '+' : ''}{etf.eneDistUpper}%
+                  {etf.eneWarnUpper && ' ⚠️触轨'}
+                </p>
+              )}
+            </div>
+            <div className={`rounded-lg p-2 text-center ${etf.eneWarnLower ? 'bg-emerald-50 ring-1 ring-emerald-300' : 'bg-slate-50'}`}>
+              <p className="text-xs text-slate-500 mb-1">ENE下轨</p>
+              <p className="text-base font-bold text-emerald-600">
+                {etf.eneLower != null ? etf.eneLower.toFixed(3) : '-'}
+              </p>
+              {etf.eneDistLower != null && (
+                <p className={`text-xs font-medium mt-0.5 ${etf.eneWarnLower ? 'text-emerald-600' : 'text-slate-400'}`}>
+                  距下轨 {etf.eneDistLower > 0 ? '+' : ''}{etf.eneDistLower}%
+                  {etf.eneWarnLower && ' 💎超跌'}
+                </p>
+              )}
+            </div>
           </div>
         </div>
       </CardContent>
