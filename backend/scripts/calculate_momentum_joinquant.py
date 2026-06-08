@@ -193,6 +193,13 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         estimated_prices = np.append(prices[1:], current_price)
         estimated_score, _, _, _ = calculate_momentum(estimated_prices)
 
+        # 3. 均线计算
+        all_closes = np.array([d['close'] for d in data])
+        ma10 = float(np.mean(all_closes[-10:])) if len(all_closes) >= 10 else None
+        ma20 = float(np.mean(all_closes[-20:])) if len(all_closes) >= 20 else None
+        below_ma10 = ma10 is not None and current_price < ma10
+        below_ma20 = ma20 is not None and current_price < ma20
+
         return {
             'code': etf_info['code'],
             'name': etf_info['name'],
@@ -203,7 +210,11 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
             'today_pct': round(today_pct, 2),
             'status': status,
             'ann_return': round(ann_return, 4),
-            'slope': round(slope, 6)
+            'slope': round(slope, 6),
+            'ma10': round(ma10, 3) if ma10 is not None else None,
+            'ma20': round(ma20, 3) if ma20 is not None else None,
+            'below_ma10': below_ma10,
+            'below_ma20': below_ma20
         }
     except Exception as e:
         import traceback

@@ -28,6 +28,10 @@ export async function GET() {
       status: etf.status,
       slope: etf.slope,
       annualReturn: etf.ann_return,
+      ma10: etf.ma10,
+      ma20: etf.ma20,
+      belowMa10: etf.below_ma10,
+      belowMa20: etf.below_ma20,
     }));
 
     // 推荐标的（返回完整对象包含预估得分）
