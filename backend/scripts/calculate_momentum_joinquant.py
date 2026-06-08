@@ -197,8 +197,8 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         all_closes = np.array([d['close'] for d in data])
         ma10 = float(np.mean(all_closes[-10:])) if len(all_closes) >= 10 else None
         ma20 = float(np.mean(all_closes[-20:])) if len(all_closes) >= 20 else None
-        below_ma10 = ma10 is not None and current_price < ma10
-        below_ma20 = ma20 is not None and current_price < ma20
+        below_ma10 = bool(ma10 is not None and current_price < ma10)
+        below_ma20 = bool(ma20 is not None and current_price < ma20)
 
         return {
             'code': etf_info['code'],
