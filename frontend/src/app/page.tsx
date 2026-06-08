@@ -24,6 +24,10 @@ interface RotationETF {
   price: number;
   todayChange: number;
   status: string;
+  ma10: number | null;
+  ma20: number | null;
+  belowMa10: boolean;
+  belowMa20: boolean;
 }
 
 // 超跌策略ETF数据
@@ -129,6 +133,24 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
           <span className={`text-base font-bold ${etf.todayChange >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
             {etf.todayChange >= 0 ? '+' : ''}{etf.todayChange}%
           </span>
+        </div>
+
+        {/* 均线 */}
+        <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
+          <div className="flex items-center gap-3 text-xs">
+            <span className="text-slate-500">MA10</span>
+            <span className={`font-semibold ${etf.belowMa10 ? 'text-red-500' : 'text-slate-700'}`}>
+              {etf.ma10 != null ? etf.ma10.toFixed(3) : '-'}
+            </span>
+            {etf.belowMa10 && <span className="text-red-400">⚠️ 低于MA10</span>}
+          </div>
+          <div className="flex items-center gap-3 text-xs">
+            <span className="text-slate-500">MA20</span>
+            <span className={`font-semibold ${etf.belowMa20 ? 'text-red-500' : 'text-slate-700'}`}>
+              {etf.ma20 != null ? etf.ma20.toFixed(3) : '-'}
+            </span>
+            {etf.belowMa20 && <span className="text-red-400">⚠️ 低于MA20</span>}
+          </div>
         </div>
       </CardContent>
     </Card>
