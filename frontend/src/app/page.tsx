@@ -83,6 +83,10 @@ interface OversoldResponse {
 
 // 趋势轮动卡片 - 按参考图设计
 function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
+  // 操作标签：清仓 > 减仓 > 加仓（优先级）
+  const actionTag = etf.belowMa20 || etf.atrAlarm ? '清仓' : etf.belowMa10 || etf.eneWarnUpper ? '减仓' : etf.eneWarnLower ? '加仓' : null;
+  const actionTagColor = actionTag === '清仓' ? 'bg-red-500' : actionTag === '减仓' ? 'bg-amber-500' : 'bg-emerald-500';
+
   const isWarning = etf.status.includes('拦截') || etf.status.includes('过低');
 
   return (
@@ -99,15 +103,22 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
               </div>
             </div>
           </div>
-          {etf.status === '正常' ? (
-            <span className="px-2 py-0.5 text-xs font-medium bg-emerald-500 text-white rounded">
-              正常
-            </span>
-          ) : (
-            <span className="px-2 py-0.5 text-xs font-medium bg-amber-500 text-white rounded">
-              {etf.status}
-            </span>
-          )}
+          <div className="flex items-center gap-1.5">
+            {actionTag && (
+              <span className={`px-2 py-0.5 text-xs font-medium ${actionTagColor} text-white rounded`}>
+                {actionTag}
+              </span>
+            )}
+            {etf.status === '正常' ? (
+              <span className="px-2 py-0.5 text-xs font-medium bg-emerald-500 text-white rounded">
+                正常
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 text-xs font-medium bg-amber-500 text-white rounded">
+                {etf.status}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* 核心指标：三个小卡片 */}
@@ -666,7 +677,7 @@ export default function ETFRotationPage() {
                 {/* 规则说明 */}
                 <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1">
                   <p className="font-medium text-slate-700 mb-1">操作规则：</p>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-4 gap-2">
                     <div className="bg-red-50 rounded p-2">
                       <p className="font-medium text-red-600 text-xs">清仓</p>
                       <p className="text-slate-500 text-[11px] leading-relaxed">
@@ -677,6 +688,12 @@ export default function ETFRotationPage() {
                       <p className="font-medium text-amber-600 text-xs">减仓</p>
                       <p className="text-slate-500 text-[11px] leading-relaxed">
   跌破10日线<br/>ENE上限
+</p>
+                    </div>
+                    <div className="bg-emerald-50 rounded p-2">
+                      <p className="font-medium text-emerald-600 text-xs">加仓</p>
+                      <p className="text-slate-500 text-[11px] leading-relaxed">
+  ENE下限
 </p>
                     </div>
                     <div className="bg-blue-50 rounded p-2">
