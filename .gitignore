@@ -34,3 +34,6 @@ coverage
 *.bak
 *.backup
 .cozeproj/reduction
+
+# Preview files
+.preview
