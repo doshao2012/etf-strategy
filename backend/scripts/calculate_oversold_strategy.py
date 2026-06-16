@@ -115,6 +115,7 @@ def get_all_etf_list() -> List[Dict]:
         {'code': '516510', 'name': '云计算ETF', 'market': 'sh', 'category': '科技'},
         {'code': '159865', 'name': '云计算ETF', 'market': 'sz', 'category': '科技'},
         {'code': '515040', 'name': '通信ETF', 'market': 'sh', 'category': '科技'},
+        {'code': '515880', 'name': '通信ETF', 'market': 'sh', 'category': '科技'},
         {'code': '159511', 'name': '人工智能ETF', 'market': 'sz', 'category': '科技'},
         {'code': '515070', 'name': '人工智能ETF', 'market': 'sh', 'category': '科技'},
         {'code': '159819', 'name': '人工智能ETF', 'market': 'sz', 'category': '科技'},
@@ -146,6 +147,7 @@ def get_all_etf_list() -> List[Dict]:
         {'code': '159799', 'name': '消费电子ETF', 'market': 'sz', 'category': '消费'},
         {'code': '159967', 'name': '消费电子ETF', 'market': 'sz', 'category': '消费'},
         {'code': '159883', 'name': '家电龙头ETF', 'market': 'sz', 'category': '消费'},
+        {'code': '159766', 'name': '旅游ETF', 'market': 'sz', 'category': '消费'},
 
         # ==================== 医药类 ====================
         {'code': '513120', 'name': '创新药ETF', 'market': 'sh', 'category': '医药'},
@@ -190,6 +192,7 @@ def get_all_etf_list() -> List[Dict]:
         {'code': '516830', 'name': '天然气ETF', 'market': 'sh', 'category': '周期'},
         {'code': '510190', 'name': '华宝油气', 'market': 'sh', 'category': '周期'},
         {'code': '159737', 'name': '油气ETF', 'market': 'sz', 'category': '周期'},
+        {'code': '513350', 'name': '油气ETF', 'market': 'sh', 'category': '周期'},
         {'code': '511990', 'name': '原油ETF', 'market': 'sh', 'category': '周期'},
         {'code': '162719', 'name': '原油LOF', 'market': 'sz', 'category': '周期'},
 
