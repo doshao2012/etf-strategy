@@ -19,6 +19,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # 全局变量：是否打印调试信息
 VERBOSE = False
@@ -28,6 +29,42 @@ MIN_MONEY_W = 10000  # 最小日均成交额（万元）- 1亿
 LOOKBACK_DAYS = 20  # 成交额统计天数
 MA_PERIOD = 10  # MA周期
 ENE_LOWER_PCT = 0.09  # 下轨偏离度 9%
+
+# 缓存文件路径
+VOLUME_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'volume_cache.json')
+HISTORY_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'history_cache.json')
+KLINE_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'kline_cache.json')
+MAX_WORKERS = 20  # 并行请求数
+
+# 内存缓存：K线数据（filter_by_volume 时预取，calculate_oversold_analysis 复用）
+_kline_cache = {}
+
+
+def load_kline_cache() -> Dict:
+    """加载K线缓存"""
+    try:
+        if os.path.exists(KLINE_CACHE_FILE):
+            with open(KLINE_CACHE_FILE, 'r') as f:
+                cache = json.load(f)
+            cache_date = cache.get('_date', '')
+            today = datetime.now().strftime('%Y-%m-%d')
+            if cache_date == today:
+                log(f"K线缓存有效: {len(cache)} 只ETF")
+                return cache
+            else:
+                log("K线缓存过期，重新获取")
+    except Exception:
+        pass
+    return {'_date': datetime.now().strftime('%Y-%m-%d')}
+
+
+def save_kline_cache(cache: Dict):
+    """保存K线缓存"""
+    try:
+        with open(KLINE_CACHE_FILE, 'w') as f:
+            json.dump(cache, f, ensure_ascii=False)
+    except Exception:
+        pass
 
 def log(message: str):
     """打印日志（仅在VERBOSE模式下）"""
@@ -207,45 +244,127 @@ def get_all_etf_list() -> List[Dict]:
 
 def get_etf_volume(etf_code: str, market: str) -> Optional[float]:
     """
-    获取ETF前一日成交额（万元）
-    使用新浪财经API获取历史K线数据
+    获取ETF前一日成交额（万元），顺便缓存K线数据供后续复用
     """
     try:
-        # 新浪财经API获取最近1天的数据（昨日数据）
-        if market == 'sz':
-            url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=sz{etf_code}&scale=240&ma=no&datalen=1"
-        else:
-            url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=sh{etf_code}&scale=240&ma=no&datalen=1"
+        # 获取最近9天的K线数据（成交额用最后一天，K线缓存给后续分析）
+        symbol = f"{market}{etf_code}"
+        url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={symbol}&scale=240&ma=no&datalen=9"
 
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=3)
         if response.status_code == 200:
             data = response.json()
             if data and len(data) > 0:
-                item = data[0]
-                # 成交额 = 成交量 * 收盘价
+                # 缓存K线数据供后续分析复用
+                _kline_cache[symbol] = data
+
+                # 最后一天算成交额
+                item = data[-1]
                 volume = float(item.get('volume', 0))
                 close = float(item.get('close', 0))
-                money = volume * close / 10000  # 换算成万元
+                money = volume * close / 10000
                 return money
     except Exception as e:
         log(f"获取成交额失败 {etf_code}: {e}")
     return None
 
 
+def load_volume_cache() -> Dict:
+    """加载成交额缓存"""
+    try:
+        if os.path.exists(VOLUME_CACHE_FILE):
+            with open(VOLUME_CACHE_FILE, 'r') as f:
+                cache = json.load(f)
+            # 检查是否当天缓存
+            cache_date = cache.get('_date', '')
+            today = datetime.now().strftime('%Y-%m-%d')
+            if cache_date == today:
+                log(f"成交额缓存有效: {len(cache)} 只ETF")
+                return cache
+            else:
+                log("成交额缓存过期，重新获取")
+    except Exception:
+        pass
+    return {'_date': datetime.now().strftime('%Y-%m-%d')}
+
+
+def save_volume_cache(cache: Dict):
+    """保存成交额缓存"""
+    try:
+        with open(VOLUME_CACHE_FILE, 'w') as f:
+            json.dump(cache, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def get_historical_from_cache(etf_code: str, market: str) -> Optional[List]:
+    """从动量策略的history_cache.json读取历史K线（避免重复请求）"""
+    try:
+        if os.path.exists(HISTORY_CACHE_FILE):
+            with open(HISTORY_CACHE_FILE, 'r') as f:
+                cache = json.load(f)
+            cache_key = f"{market}{etf_code}"  # e.g. "sz159915"
+            data_key = f"{market}_{etf_code}"  # e.g. "sz_159915"
+            for k in (cache_key, data_key):
+                if k in cache and cache[k].get('data'):
+                    return cache[k]['data']
+    except Exception:
+        pass
+    return None
+
+
 def filter_by_volume(etf_list: List[Dict], min_volume: float = 5000) -> List[Dict]:
     """
-    筛选成交额超过min_volume的ETF
+    筛选成交额超过min_volume的ETF（并行请求 + 缓存）
     """
-    filtered_etfs = []
+    # 加载缓存
+    volume_cache = load_volume_cache()
+    has_cache = len(volume_cache) > 1  # 除了_date还有数据
+    
+    # 加载K线缓存
+    global _kline_cache
+    if not _kline_cache:
+        kc = load_kline_cache()
+        for k, v in kc.items():
+            if k != '_date':
+                _kline_cache[k] = v
+    
+    # 收集需要请求的ETF
+    to_fetch = []
     for etf in etf_list:
-        volume = get_etf_volume(etf['code'], etf['market'])
-        if volume is not None and volume >= min_volume:
-            etf['volume'] = volume
-            filtered_etfs.append(etf)
-            log(f"保留: {etf['name']} ({etf['code']}), 成交额: {volume:.0f}万")
+        key = f"{etf['market']}_{etf['code']}"
+        if key in volume_cache:
+            etf['volume'] = volume_cache[key]
         else:
-            log(f"过滤: {etf['name']} ({etf['code']}), 成交额: {volume if volume else 0:.0f}万")
-
+            to_fetch.append(etf)
+    
+    # 并行获取缺失的成交额
+    if to_fetch:
+        log(f"并行获取 {len(to_fetch)} 只ETF成交额...")
+        def fetch_volume(etf):
+            volume = get_etf_volume(etf['code'], etf['market'])
+            return etf, volume
+        
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {executor.submit(fetch_volume, etf): etf for etf in to_fetch}
+            for future in as_completed(futures):
+                etf, volume = future.result()
+                key = f"{etf['market']}_{etf['code']}"
+                if volume is not None:
+                    volume_cache[key] = volume
+                    etf['volume'] = volume
+                    log(f"获取: {etf['name']} ({etf['code']}), 成交额: {volume:.0f}万")
+                else:
+                    log(f"失败: {etf['name']} ({etf['code']})")
+        
+        save_volume_cache(volume_cache)
+    
+    # 保存K线缓存（不论是否新增请求）
+    if _kline_cache:
+        save_kline_cache(_kline_cache)
+    
+    # 筛选
+    filtered_etfs = [etf for etf in etf_list if etf.get('volume', 0) >= min_volume]
     log(f"\n筛选后ETF数量: {len(filtered_etfs)}")
     return filtered_etfs
 
@@ -294,13 +413,34 @@ def merge_duplicate_etfs(etf_list: List[Dict]) -> List[Dict]:
 
 
 def get_historical_data(etf_code: str, market: str, count: int = 9) -> pd.DataFrame:
-    """获取历史K线数据"""
+    """获取历史K线数据（优先从各级缓存读取）"""
     try:
+        symbol = f"{market}{etf_code}"
+
+        # 1. 优先用内存K线缓存（filter_by_volume 时预取）
+        if symbol in _kline_cache and len(_kline_cache[symbol]) >= count:
+            data = _kline_cache[symbol]
+            df = pd.DataFrame(data[-count:])
+            df['date'] = pd.to_datetime(df['day'])
+            df['close'] = df['close'].astype(float)
+            log(f"内存缓存命中: {etf_code}")
+            return df
+
+        # 2. 再从动量策略缓存读取
+        cached = get_historical_from_cache(etf_code, market)
+        if cached and len(cached) >= count:
+            df = pd.DataFrame(cached[-count:])
+            df['date'] = pd.to_datetime(df['day'])
+            df['close'] = df['close'].astype(float)
+            log(f"磁盘缓存命中: {etf_code}")
+            return df
+
+        # 3. 缓存不够再从API获取
         if market == 'sz':
             url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=sz{etf_code}&scale=240&ma=no&datalen={count}"
         else:
             url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=sh{etf_code}&scale=240&ma=no&datalen={count}"
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=3)
         if response.status_code == 200:
             data = response.json()
             if data:
@@ -319,7 +459,7 @@ def get_realtime_price(etf_code: str, market: str) -> Optional[float]:
             url = f"http://qt.gtimg.cn/q=sz{etf_code}"
         else:
             url = f"http://qt.gtimg.cn/q=sh{etf_code}"
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=3)
         if response.status_code == 200:
             content = response.text.strip()
             if '=' in content and '"' in content:
@@ -333,24 +473,25 @@ def get_realtime_price(etf_code: str, market: str) -> Optional[float]:
 
 
 def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
-    """计算超跌分析"""
+    """计算超跌分析（并行请求）"""
     results = []
-    for etf in etf_list:
+    
+    def analyze_one(etf):
         try:
             historical_df = get_historical_data(etf['code'], etf['market'], count=9)
             if historical_df.empty or len(historical_df) < 9:
-                continue
+                return None
             
             current_price = get_realtime_price(etf['code'], etf['market'])
             if current_price is None:
-                continue
+                return None
             
             sum_past_9 = historical_df['close'].astype(float).sum()
             dynamic_ma10 = (sum_past_9 + current_price) / 10
             lower_band = dynamic_ma10 * (1 - ENE_LOWER_PCT)
             dist_to_lower = (current_price - lower_band) / lower_band * 100
             
-            result = {
+            return {
                 'code': etf['code'],
                 'name': etf['name'],
                 'market': etf['market'],
@@ -361,9 +502,16 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
                 'avg_money': round(etf.get('volume', 0), 0),
                 'category': etf.get('category', '其他')
             }
-            results.append(result)
         except Exception:
-            continue
+            return None
+    
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = [executor.submit(analyze_one, etf) for etf in etf_list]
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                results.append(result)
+    
     results.sort(key=lambda x: x['dist_to_lower'])
     return results
 
@@ -385,15 +533,49 @@ if __name__ == '__main__':
     if not is_quiet:
             print(f"获取到 {len(all_etfs)} 只ETF", file=sys.stderr)
     
-    # 第二步：筛选高流动性ETF
+    # 第二步：筛选高流动性ETF（并行获取成交额）
     if not is_quiet:
             print("\n第二步：筛选高流动性ETF（成交额 > 1亿）", file=sys.stderr)
+    
+    volume_cache = load_volume_cache()
     filtered_etfs = []
+    to_fetch = []
     for etf in all_etfs:
-        volume = get_etf_volume(etf['code'], etf['market'])
-        if volume is not None and volume >= MIN_MONEY_W:
-            etf['volume'] = volume
+        key = f"{etf['market']}_{etf['code']}"
+        if key in volume_cache:
+            etf['volume'] = volume_cache[key]
             filtered_etfs.append(etf)
+        else:
+            to_fetch.append(etf)
+    
+    if to_fetch:
+        if not is_quiet:
+                print(f"并行获取 {len(to_fetch)} 只ETF成交额...", file=sys.stderr)
+        def fetch_volume(etf):
+            volume = get_etf_volume(etf['code'], etf['market'])
+            return etf, volume
+        
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = {executor.submit(fetch_volume, etf): etf for etf in to_fetch}
+            for future in as_completed(futures):
+                etf, volume = future.result()
+                key = f"{etf['market']}_{etf['code']}"
+                if volume is not None and volume >= MIN_MONEY_W:
+                    volume_cache[key] = volume
+                    etf['volume'] = volume
+                    filtered_etfs.append(etf)
+        save_volume_cache(volume_cache)
+    else:
+        # 缓存命中，只需加上volume字段
+        for etf in all_etfs:
+            key = f"{etf['market']}_{etf['code']}"
+            if key in volume_cache:
+                etf['volume'] = volume_cache[key]
+    
+    # 保存K线缓存
+    if _kline_cache:
+        save_kline_cache(_kline_cache)
+    
     if not is_quiet:
             print(f"筛选后剩余 {len(filtered_etfs)} 只ETF", file=sys.stderr)
     
