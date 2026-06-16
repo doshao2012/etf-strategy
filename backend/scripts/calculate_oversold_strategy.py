@@ -249,7 +249,7 @@ def get_etf_volume(etf_code: str, market: str) -> Optional[float]:
     try:
         # 获取最近9天的K线数据（成交额用最后一天，K线缓存给后续分析）
         symbol = f"{market}{etf_code}"
-        url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={symbol}&scale=240&ma=no&datalen=9"
+        url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={symbol}&scale=240&ma=no&datalen=10"
 
         response = requests.get(url, timeout=3)
         if response.status_code == 200:
@@ -412,7 +412,7 @@ def merge_duplicate_etfs(etf_list: List[Dict]) -> List[Dict]:
 
 
 
-def get_historical_data(etf_code: str, market: str, count: int = 9) -> pd.DataFrame:
+def get_historical_data(etf_code: str, market: str, count: int = 10) -> pd.DataFrame:
     """获取历史K线数据（优先从各级缓存读取）"""
     try:
         symbol = f"{market}{etf_code}"
@@ -478,16 +478,26 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
     
     def analyze_one(etf):
         try:
-            historical_df = get_historical_data(etf['code'], etf['market'], count=9)
-            if historical_df.empty or len(historical_df) < 9:
+            historical_df = get_historical_data(etf['code'], etf['market'], count=10)
+            if historical_df.empty or len(historical_df) < 10:
                 return None
             
             current_price = get_realtime_price(etf['code'], etf['market'])
             if current_price is None:
                 return None
             
-            sum_past_9 = historical_df['close'].astype(float).sum()
-            dynamic_ma10 = (sum_past_9 + current_price) / 10
+            # 检查最后一条K线是否包含今天
+            closes = historical_df['close'].astype(float)
+            today_str = datetime.now().strftime('%Y-%m-%d')
+            last_day = str(historical_df['day'].iloc[-1]) if 'day' in historical_df.columns else ''
+            
+            if last_day.startswith(today_str):
+                # 收盘后：K线已包含今天，直接取10日均线
+                dynamic_ma10 = closes.sum() / 10
+            else:
+                # 盘中：K线不含今天，追加今日实时价
+                dynamic_ma10 = (closes.sum() + current_price) / 10
+            
             lower_band = dynamic_ma10 * (1 - ENE_LOWER_PCT)
             dist_to_lower = (current_price - lower_band) / lower_band * 100
             
