@@ -61,7 +61,36 @@ pnpm dev
 
 # 启动后端服务（端口3000）
 cd server && pnpm install && pnpm start
+
+# 单独运行超跌策略
+cd backend && python3 scripts/calculate_oversold_strategy.py [--quiet]
 ```
+
+## 超跌策略缓存机制
+
+### 缓存文件
+| 文件 | 用途 | 缓存策略 |
+|------|------|---------|
+| `volume_cache.json` | ETF成交额缓存 | 带 `_date` 标记，跨天自动刷新 |
+| `kline_cache.json` | K线数据缓存 | 带 `_date` 标记，跨天自动刷新 |
+
+### 判定逻辑
+```
+load_kline_cache() → 检查 _date == today:
+  ├─ 是 → 直接使用缓存，_kline_cache 内存已满
+  └─ 否 → 清空，在 get_etf_volume 中重新获取
+```
+
+### 数据流
+1. `filter_by_volume` → 成交额缓存命中 → 跳过 `get_etf_volume`
+2. `_kline_cache` 由 `load_kline_cache()` 预填充（今日缓存）或 `get_etf_volume` 动态填充
+3. `calculate_oversold_analysis` → `get_historical_data` → 优先查 `_kline_cache`（内存）→ `history_cache.json` → Sina API
+4. MA10 动态调整：K线含今天→直接10日均线；不含→追加 `get_realtime_price` 实时价
+
+### 性能
+- 有缓存：~0.7s（53只ETF）
+- 无缓存：~15-20s（123次Sina API请求）
+- 并行度：ThreadPoolExecutor(20)
 
 ## ETF 品种
 

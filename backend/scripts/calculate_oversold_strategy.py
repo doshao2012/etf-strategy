@@ -324,14 +324,6 @@ def filter_by_volume(etf_list: List[Dict], min_volume: float = 5000) -> List[Dic
     volume_cache = load_volume_cache()
     has_cache = len(volume_cache) > 1  # 除了_date还有数据
     
-    # 加载K线缓存
-    global _kline_cache
-    if not _kline_cache:
-        kc = load_kline_cache()
-        for k, v in kc.items():
-            if k != '_date':
-                _kline_cache[k] = v
-    
     # 收集需要请求的ETF
     to_fetch = []
     for etf in etf_list:
@@ -361,10 +353,6 @@ def filter_by_volume(etf_list: List[Dict], min_volume: float = 5000) -> List[Dic
                     log(f"失败: {etf['name']} ({etf['code']})")
         
         save_volume_cache(volume_cache)
-    
-    # 保存K线缓存（不论是否新增请求）
-    if _kline_cache:
-        save_kline_cache(_kline_cache)
     
     # 筛选
     filtered_etfs = [etf for etf in etf_list if etf.get('volume', 0) >= min_volume]
@@ -551,6 +539,10 @@ if __name__ == '__main__':
             print("\n第二步：筛选高流动性ETF（成交额 > 1亿）", file=sys.stderr)
     
     volume_cache = load_volume_cache()
+    
+    # 加载K线缓存（按日期判断有效性，同一天使用缓存避免重复请求）
+    _kline_cache = load_kline_cache()
+    
     filtered_etfs = []
     to_fetch = []
     for etf in all_etfs:
@@ -585,9 +577,8 @@ if __name__ == '__main__':
             if key in volume_cache:
                 etf['volume'] = volume_cache[key]
     
-    # 保存K线缓存
-    if _kline_cache:
-        save_kline_cache(_kline_cache)
+    # 保存K线缓存（按日期判断：同一天直接复用，跨天自动刷新）
+    save_kline_cache(_kline_cache)
     
     if not is_quiet:
             print(f"筛选后剩余 {len(filtered_etfs)} 只ETF", file=sys.stderr)
