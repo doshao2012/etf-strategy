@@ -482,15 +482,8 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
             
             # 检查最后一条K线是否包含今天
             closes = historical_df['close'].astype(float)
-            today_str = datetime.now().strftime('%Y-%m-%d')
-            last_day = str(historical_df['day'].iloc[-1]) if 'day' in historical_df.columns else ''
-            
-            if last_day.startswith(today_str):
-                # 收盘后：K线已包含今天，直接取10日均线
-                dynamic_ma10 = closes.sum() / 10
-            else:
-                # 盘中：K线不含今天，追加今日实时价
-                dynamic_ma10 = (closes.sum() + current_price) / 10
+            # MA10 = 10条收盘价均值（K线含今天则含，不含则纯历史），不掺入实时价
+            dynamic_ma10 = closes.sum() / 10
             
             lower_band = dynamic_ma10 * (1 - ENE_LOWER_PCT)
             dist_to_lower = (current_price - lower_band) / lower_band * 100
