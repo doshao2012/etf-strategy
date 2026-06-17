@@ -489,8 +489,8 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
                 # 收盘后：K线已包含今天，直接取10日均线
                 dynamic_ma10 = closes.sum() / 10
             else:
-                # 盘中：K线不含今天，追加今日实时价
-                dynamic_ma10 = (closes.sum() + current_price) / 10
+                # 盘中：K线不含今天，去掉最旧的一条，加入实时价（保持10条）
+                dynamic_ma10 = (closes.sum() - closes.iloc[0] + current_price) / 10
             
             lower_band = dynamic_ma10 * (1 - ENE_LOWER_PCT)
             dist_to_lower = (current_price - lower_band) / lower_band * 100
