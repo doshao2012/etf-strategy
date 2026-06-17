@@ -420,6 +420,7 @@ def get_historical_data(etf_code: str, market: str, count: int = 10) -> pd.DataF
         # 2. 再从动量策略缓存读取
         cached = get_historical_from_cache(etf_code, market)
         if cached and len(cached) >= count:
+            _kline_cache[symbol] = cached  # 回写到内存缓存
             df = pd.DataFrame(cached[-count:])
             df['date'] = pd.to_datetime(df['day'])
             df['close'] = df['close'].astype(float)
@@ -435,8 +436,10 @@ def get_historical_data(etf_code: str, market: str, count: int = 10) -> pd.DataF
         if response.status_code == 200:
             data = response.json()
             if data:
-                df = pd.DataFrame(data)
+                _kline_cache[symbol] = data  # 回写到内存缓存
+                df = pd.DataFrame(data[-count:])
                 df['date'] = pd.to_datetime(df['day'])
+                df['close'] = df['close'].astype(float)
                 return df
     except Exception:
         pass
