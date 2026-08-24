@@ -112,7 +112,7 @@ def load_config():
             market = item.get('market', 'sh' if code.startswith('5') else 'sz')
             
             # 获取历史数据
-            data = get_historical_prices(market, code, 30)
+            data = get_historical_prices(market, code, 35)
             
             # 获取实时价格（含今日高/低价）
             current, today_pct, today_high, today_low = get_realtime_price(market, code)
@@ -139,6 +139,52 @@ def load_config():
                 }
     
     return etfs
+
+def calculate_momentum(price_data):
+    """计算动量得分：线性加权回归 + R²稳定性"""
+    y = np.log(price_data)
+    x = np.arange(len(y))
+    weights = np.linspace(1, 2, len(y))
+    slope, intercept = np.polyfit(x, y, 1, w=weights)
+    
+    # R² 稳定性
+    ss_res = np.sum(weights * (y - (slope * x + intercept)) ** 2)
+    ss_tot = np.sum(weights * (y - np.mean(y)) ** 2)
+    r_squared = 1 - ss_res / ss_tot if ss_tot else 0
+    
+    # 综合得分 = 年化(slope*250转指数) * R²
+    ann_return = math.exp(slope * 250) - 1
+    score = ann_return * r_squared
+    return score, r_squared, ann_return, slope
+
+def get_daily_history(data, lookback_days=25):
+    """计算最近10个交易日每日快照：收益得分、MA10、MA20等"""
+    history = []
+    total = len(data)
+    for i in range(10):
+        end_idx = -i if i > 0 else total
+        start_idx = end_idx - lookback_days - 1
+        # 转正索引判断是否有效
+        s = start_idx if start_idx >= 0 else total + start_idx
+        e = end_idx if end_idx >= 0 else total + end_idx
+        if s < 0 or s >= e:
+            break
+        day_data = data[s:e]
+        prices = np.array([d['close'] for d in day_data])
+        score, r_squared, ann_return, _ = calculate_momentum(prices)
+        closes = [d['close'] for d in day_data]
+        ma10 = round(sum(closes[-10:]) / 10, 4) if len(closes) >= 10 else None
+        ma20 = round(sum(closes[-20:]) / 20, 4) if len(closes) >= 20 else None
+        history.append({
+            'day': day_data[-1]['day'],
+            'price': round(prices[-1], 4),
+            'score': round(score, 4),
+            'rSquared': round(r_squared, 4),
+            'annualReturn': round(ann_return, 4),
+            'ma10': ma10,
+            'ma20': ma20,
+        })
+    return history
 
 def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97):
     """
@@ -172,23 +218,6 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
 
         # 2. 动量得分 & 稳定性计算 (线性加权回归)
         # 使用全部26个数据点进行动量计算
-        def calculate_momentum(price_data):
-            """计算动量得分，复用原始策略公式"""
-            y = np.log(price_data)
-            x = np.arange(len(y))
-            weights = np.linspace(1, 2, len(y))
-            slope, intercept = np.polyfit(x, y, 1, w=weights)
-            
-            # R² 稳定性
-            ss_res = np.sum(weights * (y - (slope * x + intercept)) ** 2)
-            ss_tot = np.sum(weights * (y - np.mean(y)) ** 2)
-            r_squared = 1 - ss_res / ss_tot if ss_tot else 0
-            
-            # 综合得分 = 年化(slope*250转指数) * R²
-            ann_return = math.exp(slope * 250) - 1
-            score = ann_return * r_squared
-            return score, r_squared, ann_return, slope
-        
         score, r_squared, ann_return, slope = calculate_momentum(prices)
 
         # 3. 状态判定
@@ -273,7 +302,8 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
             'atr_two_support': atr_two_support,
             'atr_distance': atr_distance,
             'atr_alarm': bool(atr_alarm),
-            'closes': [{'day': d['day'], 'close': d['close']} for d in data_slice[-10:]]
+            'closes': [{'day': d['day'], 'close': d['close']} for d in data_slice[-10:]],
+            'daily_history': get_daily_history(data, lookback_days)
         }
     except Exception as e:
         import traceback

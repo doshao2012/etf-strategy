@@ -15,6 +15,16 @@ import { RefreshCw, Settings, Plus, Pencil, Trash2, Shield } from 'lucide-react'
 type StrategyType = 'rotation' | 'oversold';
 
 // 趋势轮动ETF数据
+interface DailySnapshot {
+  day: string;
+  price: number;
+  score: number;
+  rSquared: number;
+  annualReturn: number;
+  ma10: number | null;
+  ma20: number | null;
+}
+
 interface RotationETF {
   code: string;
   name: string;
@@ -41,6 +51,7 @@ interface RotationETF {
   atrDistance: number | null;
   atrAlarm: boolean;
   closes: { day: string; close: number }[];
+  dailyHistory: DailySnapshot[];
 }
 
 // 超跌策略ETF数据
@@ -85,6 +96,7 @@ interface OversoldResponse {
 
 // 趋势轮动卡片 - 按参考图设计
 function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
   // 操作标签：清仓 > 减仓 > 加仓（优先级）
   const actionTag = etf.belowMa20 || etf.atrAlarm ? '清仓' : etf.belowMa10 || etf.eneWarnUpper ? '减仓' : etf.eneWarnLower ? '加仓' : null;
   const actionTagColor = actionTag === '清仓' ? 'bg-red-500' : actionTag === '减仓' ? 'bg-amber-500' : 'bg-emerald-500';
@@ -122,6 +134,45 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
             )}
           </div>
         </div>
+
+        {/* 日期切换：最近10个交易日 */}
+        {etf.dailyHistory && etf.dailyHistory.length > 0 && (
+          <div className="mb-3">
+            <div className="flex items-center gap-1 overflow-x-auto pb-1">
+              {etf.dailyHistory.map((d, i) => (
+                <button
+                  key={d.day}
+                  onClick={() => setSelectedDay(selectedDay === i ? null : i)}
+                  className={`px-2 py-1 text-xs rounded whitespace-nowrap shrink-0 transition-colors ${
+                    selectedDay === i
+                      ? 'bg-blue-500 text-white'
+                      : i === 0
+                      ? 'bg-blue-100 text-blue-700 font-medium'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {d.day.slice(5)}
+                </button>
+              ))}
+            </div>
+            {selectedDay !== null && (
+              <div className="mt-2 p-2 bg-blue-50 rounded border border-blue-200 text-xs">
+                <div className="flex items-center gap-3 mb-1.5">
+                  <span className="font-medium text-blue-800">{etf.dailyHistory[selectedDay].day} 快照</span>
+                  <span className="text-blue-600">价: {etf.dailyHistory[selectedDay].price.toFixed(3)}</span>
+                  <button onClick={() => setSelectedDay(null)} className="ml-auto text-blue-500 hover:text-blue-700">返回当前</button>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div><span className="text-slate-500">得分</span> <span className="font-medium">{(etf.dailyHistory[selectedDay].score ?? 0).toFixed(4)}</span></div>
+                  <div><span className="text-slate-500">R²</span> <span className="font-medium">{(etf.dailyHistory[selectedDay].rSquared ?? 0).toFixed(3)}</span></div>
+                  <div><span className="text-slate-500">收益</span> <span className="font-medium">{(etf.dailyHistory[selectedDay].annualReturn ?? 0).toFixed(4)}</span></div>
+                  <div><span className="text-slate-500">MA10</span> <span className="font-medium">{etf.dailyHistory[selectedDay].ma10?.toFixed(3) ?? '-'}</span></div>
+                  <div><span className="text-slate-500">MA20</span> <span className="font-medium">{etf.dailyHistory[selectedDay].ma20?.toFixed(3) ?? '-'}</span></div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 核心指标：四个小卡片 */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">

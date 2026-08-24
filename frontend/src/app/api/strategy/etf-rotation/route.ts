@@ -44,6 +44,7 @@ export async function GET() {
       atrDistance: etf.atr_distance ?? null,
       atrAlarm: etf.atr_alarm ?? false,
       closes: etf.closes || [],
+      dailyHistory: etf.daily_history || [],
     }));
 
     // 推荐标的（返回完整对象包含预估得分）
