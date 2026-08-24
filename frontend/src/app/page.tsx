@@ -18,11 +18,10 @@ type StrategyType = 'rotation' | 'oversold';
 interface DailySnapshot {
   day: string;
   price: number;
+  change: number;
   score: number;
   rSquared: number;
   annualReturn: number;
-  ma10: number | null;
-  ma20: number | null;
 }
 
 interface RotationETF {
@@ -50,7 +49,6 @@ interface RotationETF {
   atrTwoSupport: number | null;
   atrDistance: number | null;
   atrAlarm: boolean;
-  closes: { day: string; close: number }[];
   dailyHistory: DailySnapshot[];
 }
 
@@ -166,8 +164,7 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
                   <div><span className="text-slate-500">得分</span> <span className="font-medium">{(etf.dailyHistory[selectedDay].score ?? 0).toFixed(4)}</span></div>
                   <div><span className="text-slate-500">R²</span> <span className="font-medium">{(etf.dailyHistory[selectedDay].rSquared ?? 0).toFixed(3)}</span></div>
                   <div><span className="text-slate-500">收益</span> <span className="font-medium">{(etf.dailyHistory[selectedDay].annualReturn ?? 0).toFixed(4)}</span></div>
-                  <div><span className="text-slate-500">MA10</span> <span className="font-medium">{etf.dailyHistory[selectedDay].ma10?.toFixed(3) ?? '-'}</span></div>
-                  <div><span className="text-slate-500">MA20</span> <span className="font-medium">{etf.dailyHistory[selectedDay].ma20?.toFixed(3) ?? '-'}</span></div>
+                  <div><span className="text-slate-500">涨跌幅</span> <span className={`font-medium ${(etf.dailyHistory[selectedDay].change ?? 0) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>{etf.dailyHistory[selectedDay].change > 0 ? '+' : ''}{(etf.dailyHistory[selectedDay].change ?? 0).toFixed(2)}%</span></div>
                 </div>
               </div>
             )}
@@ -294,38 +291,7 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
           </div>
         )}
 
-        {/* 最近10日收盘价 */}
-        {etf.closes && etf.closes.length > 0 && (
-          <details className="mt-2 pt-2 border-t border-slate-100">
-            <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-600 select-none">
-              最近10日收盘价
-            </summary>
-            <div className="mt-2 overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    <th className="text-left py-1 text-slate-400 font-medium">日期</th>
-                    <th className="text-right py-1 text-slate-400 font-medium">收盘价</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {etf.closes.slice().reverse().map((item) => (
-                    <tr key={item.day} className="border-b border-slate-50">
-                      <td className="py-1 text-slate-500">{item.day}</td>
-                      <td className={`py-1 text-right font-medium ${
-                        item.close >= (etf.closes?.[etf.closes.length-1]?.close ?? 0)
-                          ? 'text-red-500' : 'text-emerald-500'
-                      }`}>
-                        {item.close.toFixed(3)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
-        )}
-      </CardContent>
+        </CardContent>
     </Card>
   );
 }

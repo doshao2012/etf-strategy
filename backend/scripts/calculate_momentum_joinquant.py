@@ -172,17 +172,15 @@ def get_daily_history(data, lookback_days=25):
         day_data = data[s:e]
         prices = np.array([d['close'] for d in day_data])
         score, r_squared, ann_return, _ = calculate_momentum(prices)
-        closes = [d['close'] for d in day_data]
-        ma10 = round(sum(closes[-10:]) / 10, 4) if len(closes) >= 10 else None
-        ma20 = round(sum(closes[-20:]) / 20, 4) if len(closes) >= 20 else None
+        prev_close = day_data[-2]['close'] if len(day_data) >= 2 else day_data[-1]['close']
+        change = round((prices[-1] / prev_close - 1) * 100, 2) if prev_close else 0
         history.append({
             'day': day_data[-1]['day'],
             'price': round(prices[-1], 4),
+            'change': change,
             'score': round(score, 4),
             'rSquared': round(r_squared, 4),
             'annualReturn': round(ann_return, 4),
-            'ma10': ma10,
-            'ma20': ma20,
         })
     return history
 

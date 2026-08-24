@@ -1,33 +1,39 @@
 import { NextResponse } from 'next/server';
 
-// API 基础 URL - 从环境变量读取，移除尾随斜杠
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
+
+function formatDate(date: string): string {
+  const d = new Date(date);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 export async function GET() {
   try {
-    // 调用 FastAPI 后端服务
-    const response = await fetch(`${API_BASE_URL}/api/strategy/etf-rotation`);
-    const pythonResult = await response.json();
+    const response = await fetch(`${API_BASE_URL}/api/strategy/etf-rotation`, {
+      cache: 'no-store',
+    });
 
-    if (!pythonResult.data || !pythonResult.data.etfs || pythonResult.data.etfs.length === 0) {
-      return NextResponse.json(
-        { code: 500, message: '未能获取ETF策略数据' },
-        { status: 500 }
-      );
+    if (!response.ok) {
+      throw new Error(`后端返回 ${response.status}`);
     }
 
-    // 转换为前端需要的格式
-    const validResults = pythonResult.data.etfs.map((etf: any) => ({
+    const pythonResult = await response.json();
+
+    if (pythonResult.code !== 200) {
+      throw new Error(pythonResult.message || '策略计算失败');
+    }
+
+    // 转换字段命名规范（snake_case → camelCase）
+    const etfs = (pythonResult.data.etfs || []).map((etf: any) => ({
       code: etf.code,
       name: etf.name,
-      score: etf.score,
-      estimatedScore: etf.estimated_score || etf.score,
-      rSquared: etf.r_squared,
-      price: etf.price,
-      todayChange: etf.today_pct,
-      status: etf.status,
-      slope: etf.slope,
-      annualReturn: etf.ann_return,
+      score: etf.score ?? 0,
+      estimatedScore: etf.estimated_score ?? 0,
+      rSquared: etf.r_squared ?? 0,
+      annualReturn: etf.annual_return ?? 0,
+      price: etf.price ?? 0,
+      todayChange: etf.today_change ?? 0,
+      status: etf.status || '未知',
       ma10: etf.ma10 ?? null,
       ma20: etf.ma20 ?? null,
       belowMa10: etf.below_ma10 ?? false,
@@ -43,7 +49,6 @@ export async function GET() {
       atrTwoSupport: etf.atr_two_support ?? null,
       atrDistance: etf.atr_distance ?? null,
       atrAlarm: etf.atr_alarm ?? false,
-      closes: etf.closes || [],
       dailyHistory: etf.daily_history || [],
     }));
 
@@ -52,29 +57,24 @@ export async function GET() {
 
     return NextResponse.json({
       code: 200,
+      message: 'success',
       data: {
-        etfs: validResults,
-        recommend: {
-          name: recommendData?.name || null,
-          code: recommendData?.code || null,
-          score: recommendData?.score || null,
-          estimatedScore: recommendData?.estimated_score || null,
+        etfs,
+        recommend: pythonResult.data.recommend || [],
+        recommendCode: pythonResult.data.recommend_code || null,
+        timestamp: new Date().toISOString(),
+        dataSource: '快照数据',
+        summary: {
+          total: pythonResult.data.summary?.total || 0,
+          recommended: pythonResult.data.summary?.valid || 0,
+          topPick: recommendData?.name || '',
         },
-        lastUpdateTime: new Date().toLocaleString('zh-CN', {
-          timeZone: 'Asia/Shanghai',
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        }),
       },
     });
   } catch (error: any) {
-    console.error('获取ETF策略失败:', error);
+    console.error('ETF策略接口错误:', error);
     return NextResponse.json(
-      { code: 500, message: `获取ETF策略失败: ${error.message}` },
+      { code: 500, message: error.message || '获取策略失败', data: null },
       { status: 500 }
     );
   }
