@@ -21,6 +21,7 @@ interface RotationETF {
   score: number;
   estimatedScore: number;  // 预估动量得分
   rSquared: number;
+  annualReturn: number;     // 年化收益率（收益得分）
   price: number;
   todayChange: number;
   status: string;
@@ -121,8 +122,8 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
           </div>
         </div>
 
-        {/* 核心指标：三个小卡片 */}
-        <div className="grid grid-cols-3 gap-2 mb-4">
+        {/* 核心指标：四个小卡片 */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
           {/* 动量得分 */}
           <div className="bg-emerald-50 rounded-lg p-3 text-center">
             <p className="text-xs text-slate-500 mb-1">动量得分</p>
@@ -132,6 +133,14 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
             <p className={`text-xs font-medium mt-1 ${(etf.estimatedScore ?? 0) >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
               预 {((etf.estimatedScore) ?? etf.score ?? 0).toFixed(4)}
             </p>
+          </div>
+          {/* 收益得分（年化收益率） */}
+          <div className="bg-blue-50 rounded-lg p-3 text-center">
+            <p className="text-xs text-slate-500 mb-1">收益得分</p>
+            <p className={`text-xl font-bold ${(etf.annualReturn ?? 0) >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
+              {((etf.annualReturn ?? 0) * 100).toFixed(1)}%
+            </p>
+            <p className="text-xs text-slate-400 mt-1">R²=1</p>
           </div>
           {/* 稳定性 R² */}
           <div className="bg-purple-50 rounded-lg p-3 text-center">
