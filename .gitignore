@@ -37,3 +37,4 @@ coverage
 
 # Preview files
 .preview
+.codegraph
