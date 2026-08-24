@@ -43,6 +43,7 @@ export async function GET() {
       atrTwoSupport: etf.atr_two_support ?? null,
       atrDistance: etf.atr_distance ?? null,
       atrAlarm: etf.atr_alarm ?? false,
+      closes: etf.closes || [],
     }));
 
     // 推荐标的（返回完整对象包含预估得分）

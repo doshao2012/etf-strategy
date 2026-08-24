@@ -272,7 +272,8 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
             'five_day_high': five_day_high,
             'atr_two_support': atr_two_support,
             'atr_distance': atr_distance,
-            'atr_alarm': bool(atr_alarm)
+            'atr_alarm': bool(atr_alarm),
+            'closes': [{'day': d['day'], 'close': d['close']} for d in data_slice[-10:]]
         }
     except Exception as e:
         import traceback
