@@ -132,7 +132,7 @@ FUND_CODE = '023350'
 FUND_NAME = '诺安多策略混合C'
 
 def get_fund_nav_data(days=35):
-    """从天天基金获取基金净值数据"""
+    """从天天基金获取基金净值数据（自动翻页获取全部）"""
     today = datetime.now().strftime('%Y-%m-%d')
     cache_key = f'fund_{FUND_CODE}'
     cache = load_history_cache()
@@ -144,22 +144,30 @@ def get_fund_nav_data(days=35):
         s = requests.Session()
         s.headers.update(headers)
         s.get(f'https://fund.eastmoney.com/{FUND_CODE}.html', timeout=10)
-        url = f'https://api.fund.eastmoney.com/f10/lsjz?fundCode={FUND_CODE}&pageIndex=1&pageSize=100'
-        r = s.get(url, headers=headers, timeout=10)
-        result = r.json()
-        if not result.get('Data') or not result['Data'].get('LSJZList'):
+        # 翻页获取全部数据
+        all_data = []
+        page = 1
+        while True:
+            url = f'https://api.fund.eastmoney.com/f10/lsjz?fundCode={FUND_CODE}&pageIndex={page}&pageSize=100'
+            r = s.get(url, headers=headers, timeout=10)
+            result = r.json()
+            if not result.get('Data') or not result['Data'].get('LSJZList'):
+                break
+            items = result['Data']['LSJZList']
+            if not items:
+                break
+            for item in items:
+                close = float(item['DWJZ'])
+                if close > 0:
+                    all_data.append({'day': item['FSRQ'], 'close': close, 'high': close, 'low': close})
+            page += 1
+        if not all_data:
             print(f'基金{FUND_CODE}数据获取失败', file=sys.stderr)
             return []
-        items = result['Data']['LSJZList']
-        data = []
-        for item in items:
-            close = float(item['DWJZ'])
-            if close > 0:
-                data.append({'day': item['FSRQ'], 'close': close, 'high': close, 'low': close})
-        data.reverse()
-        cache[cache_key] = {'date': today, 'data': data}
+        all_data.reverse()
+        cache[cache_key] = {'date': today, 'data': all_data}
         save_history_cache(cache)
-        return [{'day': d['day'], 'close': float(d['close']), 'high': float(d['close']), 'low': float(d['close'])} for d in data[-days:]]
+        return [{'day': d['day'], 'close': float(d['close']), 'high': float(d['close']), 'low': float(d['close'])} for d in all_data[-days:]]
     except Exception as e:
         print(f'基金{FUND_CODE}数据获取失败: {e}', file=sys.stderr)
         return []
@@ -364,11 +372,7 @@ def main():
     # 计算所有ETF的指标
     results = []
     for code, etf_info in etfs.items():
-        # 动态调整回看周期：数据不足时用可用数据-1，避免基金等数据短的品种被跳过
-        actual_lookback = min(lookback_days, len(etf_info['data']) - 1)
-        if actual_lookback < 5:
-            continue  # 数据太少，跳过
-        metrics = get_metrics(etf_info, actual_lookback, score_threshold, loss_limit)
+        metrics = get_metrics(etf_info, lookback_days, score_threshold, loss_limit)
         if metrics:
             results.append(metrics)
 
