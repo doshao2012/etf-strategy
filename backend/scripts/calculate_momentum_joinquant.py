@@ -178,18 +178,14 @@ def get_fund_realtime():
         headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://fund.eastmoney.com/'}
         url = f'https://fundgz.1234567.com.cn/js/{FUND_CODE}.js'
         r = requests.get(url, headers=headers, timeout=5)
-        import json
         text = r.text.strip()
         if text.startswith('jsonpgz('):
             data = json.loads(text[8:-2])
             return float(data.get('gsz', 0) or 0), float(data.get('gszzl', 0) or 0)
         return None, None
     except Exception as e:
-        print(f'基金实时估值失败: {e}', file=sys.stderr)
         return None, None
 
-
-    return etfs
 
 def calculate_momentum(price_data):
     """计算动量得分：线性加权回归 + R²稳定性"""
