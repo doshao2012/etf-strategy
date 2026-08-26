@@ -99,157 +99,88 @@ def get_historical_prices(market, code, days=30):
         print(f"获取历史数据失败: {e}", file=sys.stderr)
         return []
 
-# ====== 微盘股指数数据源 ======
-MICROCAP_CODE = 'BK1158'
+def load_config():
+    """加载ETF配置和基金数据"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    etfs = {}
+    config_path = os.path.join(script_dir, '..', 'etf_config.json')
+    with open(config_path, 'r') as f:
+        config = json.load(f)
+    for item in config:
+        code = item['code']
+        market = item['market']
+        name = item['name']
+        data = get_historical_prices(market, code, 35)
+        if not data:
+            continue
+        current_price, today_pct, today_high, today_low = get_realtime_price(market, code)
+        if current_price:
+            data[-1] = {'day': data[-1]['day'], 'close': current_price, 'high': today_high or data[-1]['high'], 'low': today_low or data[-1]['low']}
+        etfs[code] = {'code': code, 'name': name, 'data': data, 'today_pct': today_pct}
+    fund_data = get_fund_nav_data(35)
+    fund_current, fund_pct = get_fund_realtime()
+    if fund_data:
+        if fund_current and fund_current > 0:
+            fund_data[-1] = {'day': fund_data[-1]['day'], 'close': fund_current, 'high': fund_current, 'low': fund_current}
+        else:
+            fund_pct = None
+        etfs[FUND_CODE] = {'code': FUND_CODE, 'name': FUND_NAME, 'data': fund_data, 'today_pct': fund_pct}
+    return etfs
 
-def _fetch_microcap_eastmoney(days):
-    """从东方财富获取微盘股指数K线"""
-    headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://data.eastmoney.com/'}
-    url = f'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=90.{MICROCAP_CODE}&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&lmt={days+30}'
-    r = requests.get(url, headers=headers, timeout=15)
-    result = r.json()
-    if result.get('data') and result['data'].get('klines'):
-        data = []
-        for k in result['data']['klines']:
-            p = k.split(',')
-            data.append({'day': p[0], 'close': float(p[2]), 'high': float(p[3]), 'low': float(p[4])})
-        return data
-    return None
+# ====== 场外基金数据源（微盘股替代） ======
+FUND_CODE = '023350'
+FUND_NAME = '诺安多策略混合C'
 
-def _fetch_microcap_163(days):
-    """从网易财经获取微盘股指数K线(备选)"""
-    # 网易BK1158数据
-    for mkt in ['1', '0']:
-        url = f'http://quotes.money.163.com/service/chddata.html?code={mkt}.BK1158&start=20240101&end=20260826'
-        r = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
-        if r.status_code == 200 and len(r.text) > 50:
-            lines = r.text.strip().split('\n')
-            data = []
-            for line in lines[1:]:  # skip header
-                cols = line.split(',')
-                if len(cols) >= 6:
-                    day = cols[0].replace('-', '')
-                    close = float(cols[3]) if cols[3] else 0
-                    high = float(cols[4]) if cols[4] else 0
-                    low = float(cols[5]) if cols[5] else 0
-                    if close > 0:
-                        data.append({'day': day, 'close': close, 'high': high, 'low': low})
-            if data:
-                return data[-days:]
-    return None
-
-def get_microcap_index_data(days=35):
-    """获取微盘股指数(BK1158)日K线（多数据源降级）"""
+def get_fund_nav_data(days=35):
+    """从天天基金获取基金净值数据"""
     today = datetime.now().strftime('%Y-%m-%d')
-    cache_key = 'bk_BK1158'
+    cache_key = f'fund_{FUND_CODE}'
     cache = load_history_cache()
     cached = cache.get(cache_key)
     if cached and cached.get('date') == today:
-        return [{'day': d['day'], 'close': float(d['close']), 'high': float(d['high']), 'low': float(d['low'])} for d in cached['data'][-days:]]
-    
-    data = _fetch_microcap_eastmoney(days)
-    if data is None:
-        print("东方财富不可用，尝试网易财经...", file=sys.stderr)
-        data = _fetch_microcap_163(days)
-    if data is None:
-        print("微盘股指数所有数据源均不可用", file=sys.stderr)
+        return [{'day': d['day'], 'close': float(d['close']), 'high': float(d['close']), 'low': float(d['close'])} for d in cached['data'][-days:]]
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://fund.eastmoney.com/'}
+        s = requests.Session()
+        s.headers.update(headers)
+        s.get(f'https://fund.eastmoney.com/{FUND_CODE}.html', timeout=10)
+        url = f'https://api.fund.eastmoney.com/f10/lsjz?fundCode={FUND_CODE}&pageIndex=1&pageSize=100'
+        r = s.get(url, headers=headers, timeout=10)
+        result = r.json()
+        if not result.get('Data') or not result['Data'].get('LSJZList'):
+            print(f'基金{FUND_CODE}数据获取失败', file=sys.stderr)
+            return []
+        items = result['Data']['LSJZList']
+        data = []
+        for item in items:
+            close = float(item['DWJZ'])
+            if close > 0:
+                data.append({'day': item['FSRQ'], 'close': close, 'high': close, 'low': close})
+        data.reverse()
+        cache[cache_key] = {'date': today, 'data': data}
+        save_history_cache(cache)
+        return [{'day': d['day'], 'close': float(d['close']), 'high': float(d['close']), 'low': float(d['close'])} for d in data[-days:]]
+    except Exception as e:
+        print(f'基金{FUND_CODE}数据获取失败: {e}', file=sys.stderr)
         return []
-    
-    cache[cache_key] = {'date': today, 'data': data}
-    save_history_cache(cache)
-    return [{'day': d['day'], 'close': float(d['close']), 'high': float(d['high']), 'low': float(d['low'])} for d in data[-days:]]
 
-def _get_microcap_realtime_eastmoney():
-    """从东方财富获取微盘股指数实时行情"""
-    headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://data.eastmoney.com/'}
-    url = f'https://push2.eastmoney.com/api/qt/stock/get?secid=90.{MICROCAP_CODE}&fields=f43,f44,f45,f46,f47,f48,f170,f50,f51,f52'
-    r = requests.get(url, headers=headers, timeout=5)
-    result = r.json()
-    if result.get('data'):
-        d = result['data']
-        return (d.get('f43', 0) or 0), (d.get('f170', 0) or 0)
-    return None, None
+def get_fund_realtime():
+    """从天天基金获取基金实时估值"""
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://fund.eastmoney.com/'}
+        url = f'https://fundgz.1234567.com.cn/js/{FUND_CODE}.js'
+        r = requests.get(url, headers=headers, timeout=5)
+        import json
+        text = r.text.strip()
+        if text.startswith('jsonpgz('):
+            data = json.loads(text[8:-2])
+            return float(data.get('gsz', 0) or 0), float(data.get('gszzl', 0) or 0)
+        return None, None
+    except Exception as e:
+        print(f'基金实时估值失败: {e}', file=sys.stderr)
+        return None, None
 
-def _get_microcap_realtime_tencent():
-    """从腾讯获取微盘股指数实时行情(备选)"""
-    url = f'http://qt.gtimg.cn/q=bk.{MICROCAP_CODE}'
-    r = requests.get(url, timeout=5)
-    t = r.text.strip()
-    if '=' in t and 'none_match' not in t:
-        parts = t.split('"')[1].split('~')
-        if len(parts) >= 5:
-            current = float(parts[3]) if parts[3] else 0
-            pct = float(parts[5]) if len(parts) > 5 and parts[5] else 0
-            if current > 0:
-                return current, pct
-    return None, None
 
-def get_microcap_realtime():
-    """获取微盘股指数实时行情（多数据源降级）"""
-    current, pct = _get_microcap_realtime_eastmoney()
-    if current and current > 0:
-        return current, pct
-    print("东方财富实时行情不可用，尝试腾讯...", file=sys.stderr)
-    current, pct = _get_microcap_realtime_tencent()
-    if current and current > 0:
-        return current, pct
-    return None, None
-
-def load_config():
-    """从JSON配置读取ETF列表并获取实时数据"""
-    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-        configs = json.load(f)
-    
-    etfs = {}
-    for item in configs:
-        if item.get('isActive', True):
-            code = item['code']
-            name = item['name']
-            market = item.get('market', 'sh' if code.startswith('5') else 'sz')
-            
-            # 获取历史数据
-            data = get_historical_prices(market, code, 35)
-            
-            # 获取实时价格（含今日高/低价）
-            current, today_pct, today_high, today_low = get_realtime_price(market, code)
-            if current and current > 0 and data:
-                today_str = datetime.now().strftime('%Y-%m-%d')
-                if data[-1].get('day', '').startswith(today_str):
-                    # 最后一条已经是今天 → 替换为实时数据（盘后修正 / 盘中刷新）
-                    data[-1]['close'] = current
-                    data[-1]['high'] = max(data[-1]['high'], today_high) if today_high else data[-1]['high']
-                    data[-1]['low'] = min(data[-1]['low'], today_low) if today_low else data[-1]['low']
-                elif abs(current - data[-1]['close']) > 0.001:
-                    # 最后一条不是今天，且价格有变动 → 追加实时数据（新交易日）
-                    data.append({'day': today_str, 'close': current,
-                                 'high': today_high or current,
-                                 'low': today_low or current})
-                # 否则：节假日价格不变 → 不追加，保持数据纯净
-            
-            if data:
-                etfs[code] = {
-                    'code': code,
-                    'name': name,
-                    'data': data,
-                    'today_pct': today_pct
-                }
-    
-    # 微盘股指数（东方财富BK1158）
-    micro_data = get_microcap_index_data(35)
-    micro_current, micro_pct = get_microcap_realtime()
-    if micro_data and micro_current and micro_current > 0:
-        today_str = datetime.now().strftime('%Y-%m-%d')
-        if micro_data[-1].get('day', '').startswith(today_str):
-            micro_data[-1]['close'] = micro_current
-        elif abs(micro_current - micro_data[-1]['close']) > 0.001:
-            micro_data.append({'day': today_str, 'close': micro_current, 'high': micro_current, 'low': micro_current})
-        etfs[MICROCAP_CODE] = {
-            'code': MICROCAP_CODE,
-            'name': '微盘股指数',
-            'data': micro_data,
-            'today_pct': micro_pct
-        }
-    
     return etfs
 
 def calculate_momentum(price_data):
@@ -433,7 +364,11 @@ def main():
     # 计算所有ETF的指标
     results = []
     for code, etf_info in etfs.items():
-        metrics = get_metrics(etf_info, lookback_days, score_threshold, loss_limit)
+        # 动态调整回看周期：数据不足时用可用数据-1，避免基金等数据短的品种被跳过
+        actual_lookback = min(lookback_days, len(etf_info['data']) - 1)
+        if actual_lookback < 5:
+            continue  # 数据太少，跳过
+        metrics = get_metrics(etf_info, actual_lookback, score_threshold, loss_limit)
         if metrics:
             results.append(metrics)
 
