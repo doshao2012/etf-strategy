@@ -358,18 +358,18 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
 // 均值回归策略卡片
 function MeanReversionCard({ etf, rank }: { etf: MeanReversionETF; rank: number }) {
   const signalColors: Record<string, string> = {
-    'strongBuy': 'bg-emerald-500',
-    'suggestBuy': 'bg-emerald-400',
+    'strongBuy': 'bg-green-600',
+    'suggestBuy': 'bg-emerald-500',
     'hold': 'bg-slate-400',
-    'suggestSell': 'bg-amber-500',
-    'strongSell': 'bg-red-500',
+    'suggestSell': 'bg-red-500',
+    'strongSell': 'bg-red-700',
   };
   const signalIcons: Record<string, string> = {
-    strongBuy: '🟢',
-    suggestBuy: '🟡',
-    hold: '⚪',
-    suggestSell: '🟠',
-    strongSell: '🔴',
+    strongBuy: '⬆',
+    suggestBuy: '↑',
+    hold: '—',
+    suggestSell: '↓',
+    strongSell: '⬇',
   };
 
   const ratioBarColor = (ratio: number) => {
@@ -761,8 +761,8 @@ export default function ETFRotationPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="rotation">趋势轮动</SelectItem>
-                  <SelectItem value="oversold">超跌策略</SelectItem>
                   <SelectItem value="meanReversion">均值回归</SelectItem>
+                  <SelectItem value="oversold">超跌策略</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -927,9 +927,15 @@ export default function ETFRotationPage() {
               </h2>
               
               {isMeanReversionMode ? (
-                (meanReversionData?.data.etfs || []).map((etf, index) => (
-                  <MeanReversionCard key={etf.code} etf={etf} rank={index + 1} />
-                ))
+                (() => {
+                  const sorted = [...(meanReversionData?.data.etfs || [])].sort((a, b) => {
+                    const order: Record<string, number> = { strongBuy: 0, suggestBuy: 1, hold: 2, suggestSell: 3, strongSell: 4 };
+                    return (order[a.signalLevel] ?? 99) - (order[b.signalLevel] ?? 99);
+                  });
+                  return sorted.map((etf, index) => (
+                    <MeanReversionCard key={etf.code} etf={etf} rank={index + 1} />
+                  ));
+                })()
               ) : isOversoldMode ? (
                 (oversoldData?.data.etfs || []).map((etf, index) => (
                   <OversoldCard key={etf.code} etf={etf} rank={index + 1} />

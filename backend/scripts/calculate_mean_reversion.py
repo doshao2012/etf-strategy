@@ -54,15 +54,15 @@ def generate_signal(ratio_ma90, ratio_ma250):
     one_sell = r90 > 1.12 or r250 > 1.12
 
     if both_buy:
-        return '强烈买入', 'red'
+        return '强烈买入', 'strongBuy'
     elif one_buy and not both_buy and not both_sell:
-        return '建议买入', 'orange'
+        return '建议买入', 'suggestBuy'
     elif both_sell:
-        return '强烈卖出', 'green'
+        return '强烈卖出', 'strongSell'
     elif one_sell and not both_sell:
-        return '建议卖出', 'yellow'
+        return '建议卖出', 'suggestSell'
     else:
-        return '观察/持有', 'gray'
+        return '观察/持有', 'hold'
 
 
 def main():
