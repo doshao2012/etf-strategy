@@ -84,6 +84,42 @@ export function getOversoldStrategy(): Promise<OversoldResponse> {
   return fetchAPI<OversoldResponse>('/api/strategy/oversold');
 }
 
+// 均值回归策略
+export interface MeanReversionETF {
+  code: string;
+  name: string;
+  price: number;
+  todayChange: number;
+  ma90: number;
+  ma250: number;
+  ratioMa90: number;
+  ratioMa250: number;
+  signal: string;
+  signalLevel: string;
+  dataCount: number;
+}
+
+export interface MeanReversionResponse {
+  code: number;
+  data: {
+    etfs: MeanReversionETF[];
+    timestamp: string;
+    summary: {
+      total: number;
+      strongBuy: number;
+      suggestBuy: number;
+      hold: number;
+      suggestSell: number;
+      strongSell: number;
+    };
+  };
+  message: string;
+}
+
+export function getMeanReversionStrategy(): Promise<MeanReversionResponse> {
+  return fetchAPI<MeanReversionResponse>('/api/strategy/mean-reversion');
+}
+
 // ETF配置相关API
 export interface EtfConfig {
   id: number;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getETFStrategy, getOversoldStrategy, getEtfConfigs, updateEtfConfig, createEtfConfig, deleteEtfConfig, type EtfConfig } from '@/lib/api';
+import { getETFStrategy, getOversoldStrategy, getMeanReversionStrategy, getEtfConfigs, updateEtfConfig, createEtfConfig, deleteEtfConfig, type EtfConfig, type MeanReversionETF, type MeanReversionResponse } from '@/lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { RefreshCw, Settings, Plus, Pencil, Trash2, Shield } from 'lucide-react';
 
-type StrategyType = 'rotation' | 'oversold';
+type StrategyType = 'rotation' | 'oversold' | 'meanReversion';
 
 // 趋势轮动ETF数据
 interface DailySnapshot {
@@ -355,6 +355,98 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
   );
 }
 
+// 均值回归策略卡片
+function MeanReversionCard({ etf, rank }: { etf: MeanReversionETF; rank: number }) {
+  const signalColors: Record<string, string> = {
+    'strongBuy': 'bg-emerald-500',
+    'suggestBuy': 'bg-emerald-400',
+    'hold': 'bg-slate-400',
+    'suggestSell': 'bg-amber-500',
+    'strongSell': 'bg-red-500',
+  };
+  const signalIcons: Record<string, string> = {
+    strongBuy: '🟢',
+    suggestBuy: '🟡',
+    hold: '⚪',
+    suggestSell: '🟠',
+    strongSell: '🔴',
+  };
+
+  const ratioBarColor = (ratio: number) => {
+    if (ratio < 101) return 'bg-emerald-500';
+    if (ratio > 112) return 'bg-red-500';
+    return 'bg-blue-500';
+  };
+
+  return (
+    <Card className="mb-3 bg-white border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+      <CardContent className="p-4">
+        {/* 顶部：名称、代码、信号 */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <span className="text-lg font-bold text-slate-500">#{rank}</span>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-800">{etf.name}</span>
+                <span className="text-xs text-slate-400">{etf.code}</span>
+              </div>
+            </div>
+          </div>
+          <span className={`px-2 py-0.5 text-xs font-medium ${signalColors[etf.signalLevel] || 'bg-slate-400'} text-white rounded`}>
+            {signalIcons[etf.signalLevel] || ''} {etf.signal}
+          </span>
+        </div>
+
+        {/* 价格 */}
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-sm text-slate-500">当前价格</span>
+          <span className="text-xl font-bold text-slate-800">{etf.price.toFixed(3)}</span>
+        </div>
+
+        {/* MA90 倍数 */}
+        <div className="mb-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-slate-500">MA90 = {etf.ma90.toFixed(3)}</span>
+            <span className={`text-sm font-bold ${etf.ratioMa90 >= 101 ? 'text-red-500' : 'text-emerald-500'}`}>
+              {etf.ratioMa90.toFixed(2)}%
+            </span>
+          </div>
+          <div className="w-full bg-slate-100 rounded-full h-2.5">
+            <div
+              className={`h-2.5 rounded-full ${ratioBarColor(etf.ratioMa90)}`}
+              style={{ width: `${Math.min(etf.ratioMa90 / 1.2, 100)}%` }}
+            />
+          </div>
+        </div>
+
+        {/* MA250 倍数 */}
+        <div className="mb-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-slate-500">MA250 = {etf.ma250.toFixed(3)}</span>
+            <span className={`text-sm font-bold ${etf.ratioMa250 >= 101 ? 'text-red-500' : 'text-emerald-500'}`}>
+              {etf.ratioMa250.toFixed(2)}%
+            </span>
+          </div>
+          <div className="w-full bg-slate-100 rounded-full h-2.5">
+            <div
+              className={`h-2.5 rounded-full ${ratioBarColor(etf.ratioMa250)}`}
+              style={{ width: `${Math.min(etf.ratioMa250 / 1.2, 100)}%` }}
+            />
+          </div>
+        </div>
+
+        {/* 今日涨跌幅 */}
+        <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+          <span className="text-sm text-slate-500">今日涨跌幅</span>
+          <span className={`text-base font-bold ${etf.todayChange >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+            {etf.todayChange >= 0 ? '+' : ''}{etf.todayChange}%
+          </span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function SkeletonCard() {
   return (
     <Card className="mb-3 bg-white border border-slate-200 shadow-sm">
@@ -599,6 +691,7 @@ function ConfigDialogContent({
 export default function ETFRotationPage() {
   const [rotationData, setRotationData] = useState<RotationResponse | null>(null);
   const [oversoldData, setOversoldData] = useState<OversoldResponse | null>(null);
+  const [meanReversionData, setMeanReversionData] = useState<MeanReversionResponse | null>(null);
   const [configs, setConfigs] = useState<EtfConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -614,9 +707,12 @@ export default function ETFRotationPage() {
       if (currentStrategy === 'rotation') {
         const rotation = await getETFStrategy();
         setRotationData(rotation as RotationResponse);
-      } else {
+      } else if (currentStrategy === 'oversold') {
         const oversold = await getOversoldStrategy();
         setOversoldData(oversold as OversoldResponse);
+      } else {
+        const mr = await getMeanReversionStrategy();
+        setMeanReversionData(mr as MeanReversionResponse);
       }
       setLastUpdate(new Date().toLocaleTimeString('zh-CN'));
     } catch (err: any) {
@@ -642,7 +738,8 @@ export default function ETFRotationPage() {
   }, [currentStrategy]);
 
   const isOversoldMode = currentStrategy === 'oversold';
-  const currentData = isOversoldMode ? oversoldData : rotationData;
+  const isMeanReversionMode = currentStrategy === 'meanReversion';
+  const currentData = isMeanReversionMode ? meanReversionData : (isOversoldMode ? oversoldData : rotationData);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -653,7 +750,7 @@ export default function ETFRotationPage() {
             <div>
               <h1 className="text-xl font-bold text-slate-800">ETF轮动策略</h1>
               <p className="text-xs text-slate-400">
-                {isOversoldMode ? '超跌策略' : '趋势轮动'}
+                {isMeanReversionMode ? '均值回归' : isOversoldMode ? '超跌策略' : '趋势轮动'}
               </p>
             </div>
             
@@ -665,6 +762,7 @@ export default function ETFRotationPage() {
                 <SelectContent>
                   <SelectItem value="rotation">趋势轮动</SelectItem>
                   <SelectItem value="oversold">超跌策略</SelectItem>
+                  <SelectItem value="meanReversion">均值回归</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -676,13 +774,7 @@ export default function ETFRotationPage() {
                 <Settings className="h-5 w-5 text-slate-500" />
               </button>
 
-              <a
-                href="/mean-reversion"
-                className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
-                title="均值回归策略"
-              >
-                <Shield className="h-5 w-5 text-slate-500" />
-              </a>
+              
 
               <button
                 onClick={fetchData}
@@ -777,12 +869,18 @@ export default function ETFRotationPage() {
             {/* ETF 列表 */}
             <div>
               <h2 className="text-sm font-medium text-slate-500 mb-3">
-                {isOversoldMode 
+                {isMeanReversionMode
+                  ? `均值回归 (${meanReversionData?.data.etfs.length || 0})`
+                  : isOversoldMode 
                   ? `ENE下轨标的 (${oversoldData?.data.etfs.length || 0})` 
                   : `趋势排名 (${rotationData?.data.etfs.length || 0})`}
               </h2>
               
-              {isOversoldMode ? (
+              {isMeanReversionMode ? (
+                (meanReversionData?.data.etfs || []).map((etf, index) => (
+                  <MeanReversionCard key={etf.code} etf={etf} rank={index + 1} />
+                ))
+              ) : isOversoldMode ? (
                 (oversoldData?.data.etfs || []).map((etf, index) => (
                   <OversoldCard key={etf.code} etf={etf} rank={index + 1} />
                 ))
