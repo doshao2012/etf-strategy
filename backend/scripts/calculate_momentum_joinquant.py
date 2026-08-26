@@ -99,6 +99,52 @@ def get_historical_prices(market, code, days=30):
         print(f"获取历史数据失败: {e}", file=sys.stderr)
         return []
 
+# ====== 微盘股指数数据源 ======
+MICROCAP_CODE = 'BK1158'
+
+def get_microcap_index_data(days=35):
+    """从东方财富获取微盘股指数(BK1158)日K线"""
+    today = datetime.now().strftime('%Y-%m-%d')
+    cache_key = 'bk_BK1158'
+    cache = load_history_cache()
+    cached = cache.get(cache_key)
+    if cached and cached.get('date') == today:
+        data = cached['data']
+        return [{'day': d['day'], 'close': float(d['close']), 'high': float(d['high']), 'low': float(d['low'])} for d in data[-days:]]
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://data.eastmoney.com/'}
+        url = f'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=90.{MICROCAP_CODE}&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&lmt={days+30}'
+        r = requests.get(url, headers=headers, timeout=15)
+        result = r.json()
+        if not result.get('data') or not result['data'].get('klines'):
+            print(f"微盘股指数获取失败: 无数据", file=sys.stderr)
+            return []
+        data = []
+        for k in result['data']['klines']:
+            p = k.split(',')
+            data.append({'day': p[0], 'open': float(p[1]), 'close': float(p[2]), 'high': float(p[3]), 'low': float(p[4]), 'volume': float(p[5]), 'amount': float(p[6])})
+        cache[cache_key] = {'date': today, 'data': data}
+        save_history_cache(cache)
+        return [{'day': d['day'], 'close': float(d['close']), 'high': float(d['high']), 'low': float(d['low'])} for d in data[-days:]]
+    except Exception as e:
+        print(f"微盘股指数获取失败: {e}", file=sys.stderr)
+        return []
+
+def get_microcap_realtime():
+    """从东方财富获取微盘股指数实时行情"""
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://data.eastmoney.com/'}
+        url = f'https://push2.eastmoney.com/api/qt/stock/get?secid=90.{MICROCAP_CODE}&fields=f43,f44,f45,f46,f47,f48,f170,f50,f51,f52'
+        r = requests.get(url, headers=headers, timeout=5)
+        result = r.json()
+        if result.get('data'):
+            d = result['data']
+            return (d.get('f43', 0) or 0), (d.get('f170', 0) or 0), (d.get('f45', 0) or 0), (d.get('f46', 0) or 0)
+        return None, None, None, None
+    except Exception as e:
+        print(f"微盘股实时行情失败: {e}", file=sys.stderr)
+        return None, None, None, None
+
 def load_config():
     """从JSON配置读取ETF列表并获取实时数据"""
     with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -137,6 +183,24 @@ def load_config():
                     'data': data,
                     'today_pct': today_pct
                 }
+    
+    # 微盘股指数（东方财富BK1158）
+    micro_data = get_microcap_index_data(35)
+    micro_current, micro_pct, micro_high, micro_low = get_microcap_realtime()
+    if micro_data and micro_current and micro_current > 0:
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        if micro_data[-1].get('day', '').startswith(today_str):
+            micro_data[-1]['close'] = micro_current
+            micro_data[-1]['high'] = max(micro_data[-1]['high'], micro_high) if micro_high else micro_data[-1]['high']
+            micro_data[-1]['low'] = min(micro_data[-1]['low'], micro_low) if micro_low else micro_data[-1]['low']
+        elif abs(micro_current - micro_data[-1]['close']) > 0.001:
+            micro_data.append({'day': today_str, 'close': micro_current, 'high': micro_high or micro_current, 'low': micro_low or micro_current})
+        etfs[MICROCAP_CODE] = {
+            'code': MICROCAP_CODE,
+            'name': '微盘股指数',
+            'data': micro_data,
+            'today_pct': micro_pct
+        }
     
     return etfs
 
