@@ -676,6 +676,14 @@ export default function ETFRotationPage() {
                 <Settings className="h-5 w-5 text-slate-500" />
               </button>
 
+              <a
+                href="/mean-reversion"
+                className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+                title="均值回归策略"
+              >
+                <Shield className="h-5 w-5 text-slate-500" />
+              </a>
+
               <button
                 onClick={fetchData}
                 disabled={loading}

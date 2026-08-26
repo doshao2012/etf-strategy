@@ -146,6 +146,27 @@ def get_oversold_strategy():
         return {"code": 500, "message": str(e)}
 
 
+@app.get("/api/strategy/mean-reversion")
+def get_mean_reversion_strategy():
+    """获取均值回归策略"""
+    import subprocess
+    import json
+    
+    try:
+        script = os.path.join(os.path.dirname(__file__), "scripts", "calculate_mean_reversion.py")
+        result = subprocess.run(
+            ["python3", script],
+            capture_output=True, text=True, timeout=60
+        )
+        
+        if result.returncode != 0:
+            return {"code": 500, "message": "计算失败", "error": result.stderr}
+        
+        return json.loads(result.stdout)
+    except Exception as e:
+        return {"code": 500, "message": str(e)}
+
+
 # ============== 健康检查 ==============
 
 @app.get("/api/health")
