@@ -808,61 +808,111 @@ export default function ETFRotationPage() {
             <Card className="mb-4 bg-white border border-slate-200 shadow-sm">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Shield className="w-5 h-5 text-emerald-500" />
-                    <span className="text-sm font-medium text-slate-700">
-                      建议持仓
-                    </span>
-                    <span className="text-sm font-bold text-emerald-600">
+                  {isMeanReversionMode ? (
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-5 h-5 text-emerald-500" />
+                      <span className="text-sm font-medium text-slate-700 mr-2">
+                        信号分布
+                      </span>
                       {(() => {
-                        // 趋势轮动：找状态正常且排名第一的
-                        if (!isOversoldMode && rotationData?.data.etfs) {
-                          const normalEtf = rotationData.data.etfs.find((etf, idx) => 
-                            idx === 0 && etf.status === '正常'
-                          );
-                          return normalEtf ? normalEtf.name : '空仓';
-                        }
-                        // 超跌策略：使用第一个推荐
-                        return isOversoldMode 
-                          ? (oversoldData?.data.recommend?.[0] || '空仓')
-                          : '空仓';
+                        const etfs = meanReversionData?.data.etfs || [];
+                        const counts = { '强烈买入': 0, '建议买入': 0, '观察/持有': 0, '建议卖出': 0, '强烈卖出': 0 };
+                        etfs.forEach(e => { if (e.signal in counts) (counts as Record<string, number>)[e.signal]++; });
+                        return (
+                          <div className="flex gap-2 text-xs">
+                            {Object.entries(counts).map(([k, v]) => {
+                              const colors: Record<string, string> = { '强烈买入': 'text-red-600', '建议买入': 'text-orange-500', '观察/持有': 'text-slate-500', '建议卖出': 'text-yellow-600', '强烈卖出': 'text-green-600' };
+                              return <span key={k} className={`${colors[k] || 'text-slate-500'} font-medium`}>{k} {v}</span>;
+                            })}
+                          </div>
+                        );
                       })()}
-                    </span>
-                  </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-5 h-5 text-emerald-500" />
+                      <span className="text-sm font-medium text-slate-700">
+                        建议持仓
+                      </span>
+                      <span className="text-sm font-bold text-emerald-600">
+                        {(() => {
+                          // 趋势轮动：找状态正常且排名第一的
+                          if (!isOversoldMode && rotationData?.data.etfs) {
+                            const normalEtf = rotationData.data.etfs.find((etf, idx) => 
+                              idx === 0 && etf.status === '正常'
+                            );
+                            return normalEtf ? normalEtf.name : '空仓';
+                          }
+                          // 超跌策略：使用第一个推荐
+                          return isOversoldMode 
+                            ? (oversoldData?.data.recommend?.[0] || '空仓')
+                            : '空仓';
+                        })()}
+                      </span>
+                    </div>
+                  )}
                   <span className="text-xs text-slate-400">
                     更新时间: {lastUpdate}
                   </span>
                 </div>
                 {/* 规则说明 */}
-                <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1">
-                  <p className="font-medium text-slate-700 mb-1">操作规则：</p>
-                  <div className="grid grid-cols-4 gap-2">
-                    <div className="bg-red-50 rounded p-2">
-                      <p className="font-medium text-red-600 text-xs">清仓</p>
-                      <p className="text-slate-500 text-[11px] leading-relaxed">
-  当日大跌<br/>跌破20日线<br/>分数不是第一<br/>ATR止盈
-</p>
-                    </div>
-                    <div className="bg-amber-50 rounded p-2">
-                      <p className="font-medium text-amber-600 text-xs">减仓</p>
-                      <p className="text-slate-500 text-[11px] leading-relaxed">
-  跌破10日线<br/>ENE上限
-</p>
-                    </div>
-                    <div className="bg-emerald-50 rounded p-2">
-                      <p className="font-medium text-emerald-600 text-xs">加仓</p>
-                      <p className="text-slate-500 text-[11px] leading-relaxed">
-  ENE下限
-</p>
-                    </div>
-                    <div className="bg-blue-50 rounded p-2">
-                      <p className="font-medium text-blue-600 text-xs">分数上限</p>
-                      <p className="text-slate-500 text-[11px] leading-relaxed">
-  保守选择3<br/>按照95%上限
-</p>
+                {isMeanReversionMode ? (
+                  <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1">
+                    <p className="font-medium text-slate-700 mb-1">操作规则：</p>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      <div className="bg-red-50 rounded p-2">
+                        <p className="font-medium text-red-600 text-xs">强烈买入</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">MA90和MA250<br/>均低于1.01倍</p>
+                      </div>
+                      <div className="bg-orange-50 rounded p-2">
+                        <p className="font-medium text-orange-500 text-xs">建议买入</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">MA90或MA250<br/>低于1.01倍</p>
+                      </div>
+                      <div className="bg-slate-50 rounded p-2">
+                        <p className="font-medium text-slate-500 text-xs">观察/持有</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">介于1.01倍<br/>至1.12倍之间</p>
+                      </div>
+                      <div className="bg-yellow-50 rounded p-2">
+                        <p className="font-medium text-yellow-600 text-xs">建议卖出</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">MA90或MA250<br/>高于1.12倍</p>
+                      </div>
+                      <div className="bg-green-50 rounded p-2">
+                        <p className="font-medium text-green-600 text-xs">强烈卖出</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">MA90和MA250<br/>均高于1.12倍</p>
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1">
+                    <p className="font-medium text-slate-700 mb-1">操作规则：</p>
+                    <div className="grid grid-cols-4 gap-2">
+                      <div className="bg-red-50 rounded p-2">
+                        <p className="font-medium text-red-600 text-xs">清仓</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">
+  当日大跌<br/>跌破20日线<br/>分数不是第一<br/>ATR止盈
+</p>
+                      </div>
+                      <div className="bg-amber-50 rounded p-2">
+                        <p className="font-medium text-amber-600 text-xs">减仓</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">
+  跌破10日线<br/>ENE上限
+</p>
+                      </div>
+                      <div className="bg-emerald-50 rounded p-2">
+                        <p className="font-medium text-emerald-600 text-xs">加仓</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">
+  ENE下限
+</p>
+                      </div>
+                      <div className="bg-blue-50 rounded p-2">
+                        <p className="font-medium text-blue-600 text-xs">分数上限</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">
+  保守选择3<br/>按照95%上限
+</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
