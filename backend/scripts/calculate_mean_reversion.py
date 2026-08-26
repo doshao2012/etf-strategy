@@ -2,13 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 均值回归策略：计算ETF相对MA90和MA250的倍数，生成买卖信号
+数据获取和更新方式参考动量轮动策略（calculate_momentum_joinquant.py）
 """
 import sys
 import json
 import os
-import requests
-import re
 from datetime import datetime
+
+# 从动量策略脚本导入数据获取函数
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from calculate_momentum_joinquant import get_historical_prices, get_realtime_price, load_history_cache, save_history_cache
 
 # 策略标的：code, market, name
 TARGET_ETFS = [
@@ -19,69 +22,17 @@ TARGET_ETFS = [
     {'code': '588220', 'market': 'sh', 'name': '科创100ETF'},
 ]
 
-HISTORY_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'history_cache.json')
 
-def load_history_cache():
-    try:
-        if os.path.exists(HISTORY_CACHE_FILE):
-            with open(HISTORY_CACHE_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-    except:
-        pass
-    return {}
+def get_etf_data(market, code, days=260):
+    """获取ETF数据，参考动量策略的load_config"""
+    data = get_historical_prices(market, code, days)
+    if not data:
+        return None, None, None
+    current_price, today_pct, _, _ = get_realtime_price(market, code)
+    if current_price:
+        data[-1] = {'day': data[-1]['day'], 'close': current_price, 'high': current_price, 'low': current_price}
+    return data, current_price, today_pct
 
-def save_history_cache(cache):
-    try:
-        with open(HISTORY_CACHE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(cache, f, ensure_ascii=False)
-    except Exception as e:
-        print(f"保存历史缓存失败: {e}", file=sys.stderr)
-
-def get_historical_prices(market, code, days=260):
-    """获取历史K线数据（按天缓存），需要至少250个交易日"""
-    today = datetime.now().strftime('%Y-%m-%d')
-    cache_key = f"{market}_{code}"
-    cache = load_history_cache()
-    cached_data = cache.get(cache_key)
-
-    if cached_data and cached_data.get('date') == today:
-        data = cached_data.get('data', [])
-        if len(data) >= days:
-            return [{'day': item['day'], 'close': float(item['close'])} for item in data[-days:]]
-
-    try:
-        url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={market}{code}&scale=240&ma=no&datalen={days+30}"
-        response = requests.get(url, timeout=15)
-        content = response.text
-        if not content or content == 'null':
-            return []
-        data = json.loads(content)
-        if not data:
-            return []
-        cache[cache_key] = {'date': today, 'data': data}
-        save_history_cache(cache)
-        return [{'day': item['day'], 'close': float(item['close'])} for item in data[-days:]]
-    except Exception as e:
-        print(f"获取{code}历史数据失败: {e}", file=sys.stderr)
-        return []
-
-def get_realtime_price(market, code):
-    """获取实时价格"""
-    try:
-        url = f"https://qt.gtimg.cn/q={market}{code}"
-        response = requests.get(url, timeout=5)
-        content = response.text
-        match = re.search(f'v_{market}{code}="([^"]+)"', content)
-        if not match:
-            return None, None
-        data_str = match.group(1)
-        fields = data_str.split('~')
-        current = float(fields[3]) if fields[3] else 0
-        change_pct = float(fields[32]) if len(fields) > 32 and fields[32] else 0
-        return current, change_pct
-    except Exception as e:
-        print(f"获取{code}实时价格失败: {e}", file=sys.stderr)
-        return None, None
 
 def calculate_ma(closes, period):
     """计算移动平均线"""
@@ -89,11 +40,12 @@ def calculate_ma(closes, period):
         return None
     return sum(closes[-period:]) / period
 
+
 def generate_signal(ratio_ma90, ratio_ma250):
     """根据MA倍数生成买卖信号"""
     if ratio_ma90 is None or ratio_ma250 is None:
         return '数据不足', 'gray'
-    r90 = ratio_ma90 / 100  # 转换回倍数
+    r90 = ratio_ma90 / 100
     r250 = ratio_ma250 / 100
 
     both_buy = r90 < 1.01 and r250 < 1.01
@@ -112,6 +64,7 @@ def generate_signal(ratio_ma90, ratio_ma250):
     else:
         return '观察/持有', 'gray'
 
+
 def main():
     results = []
     for etf in TARGET_ETFS:
@@ -119,26 +72,24 @@ def main():
         market = etf['market']
         name = etf['name']
 
-        # 获取历史数据（至少250个交易日）
-        data = get_historical_prices(market, code, 260)
-        if len(data) < 250:
+        # 获取数据（参考动量策略：get_historical_prices + get_realtime_price）
+        data, current_price, today_pct = get_etf_data(market, code, 260)
+        if not data or len(data) < 250:
             results.append({
                 'code': code, 'name': name,
                 'price': None, 'todayChange': None,
                 'ma90': None, 'ma250': None,
                 'ratioMa90': None, 'ratioMa250': None,
                 'signal': '数据不足', 'signalLevel': 'gray',
-                'dataCount': len(data)
+                'dataCount': len(data) if data else 0
             })
             continue
 
-        # 获取实时价格替换最新收盘价
-        current_price, today_pct = get_realtime_price(market, code)
-        if current_price:
-            data[-1] = {'day': data[-1]['day'], 'close': current_price}
-
         closes = [d['close'] for d in data]
         price = closes[-1]
+
+        # 与动量策略一致：用实时价替换最后一个close
+        price_for_ma = current_price if current_price else price
 
         # 计算MA90和MA250
         ma90 = calculate_ma(closes, 90)
@@ -147,7 +98,8 @@ def main():
         if ma90 is None or ma250 is None:
             results.append({
                 'code': code, 'name': name,
-                'price': round(price, 3), 'todayChange': round(today_pct, 2) if today_pct is not None else None,
+                'price': round(price, 3),
+                'todayChange': round(today_pct, 2) if today_pct is not None else None,
                 'ma90': round(ma90, 3) if ma90 else None,
                 'ma250': round(ma250, 3) if ma250 else None,
                 'ratioMa90': None, 'ratioMa250': None,
@@ -157,15 +109,15 @@ def main():
             continue
 
         # 计算价格相对MA的倍数（百分比形式）
-        ratio_ma90 = round(price / ma90 * 100, 2)
-        ratio_ma250 = round(price / ma250 * 100, 2)
+        ratio_ma90 = round(price_for_ma / ma90 * 100, 2)
+        ratio_ma250 = round(price_for_ma / ma250 * 100, 2)
 
         # 生成信号
         signal, signal_level = generate_signal(ratio_ma90, ratio_ma250)
 
         results.append({
             'code': code, 'name': name,
-            'price': round(price, 3),
+            'price': round(price_for_ma, 3),
             'todayChange': round(today_pct, 2) if today_pct is not None else None,
             'ma90': round(ma90, 3),
             'ma250': round(ma250, 3),
@@ -194,6 +146,7 @@ def main():
     }
 
     print(json.dumps(output, ensure_ascii=False, indent=2))
+
 
 if __name__ == '__main__':
     main()
