@@ -400,10 +400,11 @@ function MeanReversionCard({ etf, rank }: { etf: MeanReversionETF; rank: number 
         {/* 价格 */}
         <div className="flex items-center justify-between mb-3">
           <span className="text-sm text-slate-500">当前价格</span>
-          <span className="text-xl font-bold text-slate-800">{etf.price.toFixed(3)}</span>
+          <span className="text-xl font-bold text-slate-800">{(etf.price ?? 0).toFixed(3)}</span>
         </div>
 
         {/* MA90 倍数 */}
+        {etf.ma90 != null && etf.ratioMa90 != null ? (
         <div className="mb-3">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs text-slate-500">MA90 = {etf.ma90.toFixed(3)}</span>
@@ -418,8 +419,12 @@ function MeanReversionCard({ etf, rank }: { etf: MeanReversionETF; rank: number 
             />
           </div>
         </div>
+        ) : (
+          <div className="mb-3 text-sm text-slate-400">MA90: 数据不足</div>
+        )}
 
         {/* MA250 倍数 */}
+        {etf.ma250 != null && etf.ratioMa250 != null ? (
         <div className="mb-3">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs text-slate-500">MA250 = {etf.ma250.toFixed(3)}</span>
@@ -434,12 +439,15 @@ function MeanReversionCard({ etf, rank }: { etf: MeanReversionETF; rank: number 
             />
           </div>
         </div>
+        ) : (
+          <div className="mb-3 text-sm text-slate-400">MA250: 数据不足</div>
+        )}
 
         {/* 今日涨跌幅 */}
         <div className="flex items-center justify-between pt-2 border-t border-slate-100">
           <span className="text-sm text-slate-500">今日涨跌幅</span>
-          <span className={`text-base font-bold ${etf.todayChange >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-            {etf.todayChange >= 0 ? '+' : ''}{etf.todayChange}%
+          <span className={`text-base font-bold ${(etf.todayChange ?? 0) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+            {(etf.todayChange ?? 0) >= 0 ? '+' : ''}{etf.todayChange ?? 0}%
           </span>
         </div>
       </CardContent>
