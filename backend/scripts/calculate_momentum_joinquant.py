@@ -115,13 +115,23 @@ def load_config():
             continue
         current_price, today_pct, today_high, today_low = get_realtime_price(market, code)
         if current_price:
-            data[-1] = {'day': data[-1]['day'], 'close': current_price, 'high': today_high or data[-1]['high'], 'low': today_low or data[-1]['low']}
+            today_str = datetime.now().strftime('%Y-%m-%d')
+            if data[-1]['day'] == today_str:
+                # K线已有今日数据，更新收盘价
+                data[-1] = {'day': data[-1]['day'], 'close': current_price, 'high': today_high or data[-1]['high'], 'low': today_low or data[-1]['low']}
+            else:
+                # K线无今日数据，追加今日K线
+                data.append({'day': today_str, 'close': current_price, 'high': today_high or current_price, 'low': today_low or current_price})
         etfs[code] = {'code': code, 'name': name, 'data': data, 'today_pct': today_pct}
     fund_data = get_fund_nav_data(35)
     fund_current, fund_pct = get_fund_realtime()
     if fund_data:
         if fund_current and fund_current > 0:
-            fund_data[-1] = {'day': fund_data[-1]['day'], 'close': fund_current, 'high': fund_current, 'low': fund_current}
+            today_str = datetime.now().strftime('%Y-%m-%d')
+            if fund_data[-1]['day'] == today_str:
+                fund_data[-1] = {'day': fund_data[-1]['day'], 'close': fund_current, 'high': fund_current, 'low': fund_current}
+            else:
+                fund_data.append({'day': today_str, 'close': fund_current, 'high': fund_current, 'low': fund_current})
         else:
             fund_pct = None
         etfs[FUND_CODE] = {'code': FUND_CODE, 'name': FUND_NAME, 'data': fund_data, 'today_pct': fund_pct}
