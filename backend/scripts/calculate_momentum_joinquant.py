@@ -258,8 +258,11 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         prices = np.array([d['close'] for d in data_slice])  # 26个数据点
 
         current_price = prices[-1]  # 最后一个数据作为当前价格
-        last_close = data[-2]['close']  # 昨日收盘价（data[-2]是倒数第二个数据）
-        today_pct = (current_price / last_close - 1) * 100  # 今日涨跌幅
+        # 优先使用腾讯财经的实时涨跌幅（更准确），否则用K线数据计算
+        today_pct = etf_info.get('today_pct')
+        if today_pct is None:
+            last_close = data[-2]['close']  # 昨日收盘价
+            today_pct = (current_price / last_close - 1) * 100  # 今日涨跌幅
 
         # 2. 动量得分 & 稳定性计算 (线性加权回归)
         # 使用全部26个数据点进行动量计算
