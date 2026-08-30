@@ -26,7 +26,7 @@ def get_realtime_price(market, code):
         
         match = re.search(f'v_{market}{code}="([^"]+)"', content)
         if not match:
-            return None, None, None, None
+            return None, None, None, None, None
         
         data_str = match.group(1)
         fields = data_str.split('~')
@@ -36,11 +36,14 @@ def get_realtime_price(market, code):
         change_pct = float(fields[32]) if len(fields) > 32 and fields[32] else 0
         today_high = float(fields[33]) if len(fields) > 33 and fields[33] else current
         today_low = float(fields[34]) if len(fields) > 34 and fields[34] else current
+        # 腾讯时间字段（索引30），格式 YYYYMMDDHHMMSS
+        trade_time = fields[30] if len(fields) > 30 and fields[30] else ''
+        trade_date = f'{trade_time[:4]}-{trade_time[4:6]}-{trade_time[6:8]}' if len(trade_time) >= 8 else ''
         
-        return current, change_pct, today_high, today_low
+        return current, change_pct, today_high, today_low, trade_date
     except Exception as e:
         print(f"获取实时价格失败: {e}", file=sys.stderr)
-        return None, None, None, None
+        return None, None, None, None, None
 
 def load_history_cache():
     """加载历史数据缓存"""
@@ -115,26 +118,23 @@ def load_config():
         data = get_historical_prices(market, code, 35)
         if not data:
             continue
-        current_price, today_pct, today_high, today_low = get_realtime_price(market, code)
-        # 仅交易日（周一至周五）才更新实时数据
-        if datetime.now().weekday() < 5 and current_price:
-            today_str = datetime.now().strftime('%Y-%m-%d')
-            if data[-1]['day'] == today_str:
-                # K线已有今日数据，更新收盘价
-                data[-1] = {'day': data[-1]['day'], 'close': current_price, 'high': today_high or data[-1]['high'], 'low': today_low or data[-1]['low']}
-            else:
-                # K线无今日数据，追加今日K线
-                data.append({'day': today_str, 'close': current_price, 'high': today_high or current_price, 'low': today_low or current_price})
+        current_price, today_pct, today_high, today_low, trade_date = get_realtime_price(market, code)
+        # 仅当腾讯API日期与K线最新日期一致时（即当天有交易数据），才更新实时数据
+        if current_price and trade_date and data[-1]['day'] == trade_date:
+            # K线已有今日数据，更新收盘价
+            data[-1] = {'day': data[-1]['day'], 'close': current_price, 'high': today_high or data[-1]['high'], 'low': today_low or data[-1]['low']}
+        elif current_price and trade_date and trade_date > data[-1]['day']:
+            # 腾讯日期比K线最新日期更新（如节后第一天），追加今日K线
+            data.append({'day': trade_date, 'close': current_price, 'high': today_high or current_price, 'low': today_low or current_price})
         etfs[code] = {'code': code, 'name': name, 'data': data, 'today_pct': today_pct}
     fund_data = get_fund_nav_data(35)
     fund_current, fund_pct = get_fund_realtime()
     if fund_data:
-        if datetime.now().weekday() < 5 and fund_current and fund_current > 0:
-            today_str = datetime.now().strftime('%Y-%m-%d')
-            if fund_data[-1]['day'] == today_str:
-                fund_data[-1] = {'day': fund_data[-1]['day'], 'close': fund_current, 'high': fund_current, 'low': fund_current}
-            else:
-                fund_data.append({'day': today_str, 'close': fund_current, 'high': fund_current, 'low': fund_current})
+        fund_trade_date = fund_data[-1]['day']
+        if fund_current and fund_current > 0 and fund_trade_date == today_str:
+            fund_data[-1] = {'day': fund_data[-1]['day'], 'close': fund_current, 'high': fund_current, 'low': fund_current}
+        elif fund_current and fund_current > 0 and fund_trade_date > today_str:
+            fund_data.append({'day': trade_date, 'close': fund_current, 'high': fund_current, 'low': fund_current})
         else:
             fund_pct = None
         etfs[FUND_CODE] = {'code': FUND_CODE, 'name': FUND_NAME, 'data': fund_data, 'today_pct': fund_pct}

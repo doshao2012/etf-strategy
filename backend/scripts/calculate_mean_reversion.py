@@ -28,9 +28,9 @@ def get_etf_data(market, code, days=260):
     data = get_historical_prices(market, code, days)
     if not data:
         return None, None, None
-    current_price, today_pct, _, _ = get_realtime_price(market, code)
-    # 仅交易日（周一至周五）才更新实时数据
-    if datetime.now().weekday() < 5 and current_price:
+    current_price, today_pct, _, _, trade_date = get_realtime_price(market, code)
+    # 仅交易日（腾讯日期与K线最新日期一致）才更新实时数据
+    if current_price and trade_date and data and trade_date == data[-1]['day']:
         data[-1] = {'day': data[-1]['day'], 'close': current_price, 'high': current_price, 'low': current_price}
     return data, current_price, today_pct
 
