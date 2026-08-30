@@ -116,7 +116,8 @@ def load_config():
         if not data:
             continue
         current_price, today_pct, today_high, today_low = get_realtime_price(market, code)
-        if current_price:
+        # 仅交易日（周一至周五）才更新实时数据
+        if datetime.now().weekday() < 5 and current_price:
             today_str = datetime.now().strftime('%Y-%m-%d')
             if data[-1]['day'] == today_str:
                 # K线已有今日数据，更新收盘价
@@ -128,7 +129,7 @@ def load_config():
     fund_data = get_fund_nav_data(35)
     fund_current, fund_pct = get_fund_realtime()
     if fund_data:
-        if fund_current and fund_current > 0:
+        if datetime.now().weekday() < 5 and fund_current and fund_current > 0:
             today_str = datetime.now().strftime('%Y-%m-%d')
             if fund_data[-1]['day'] == today_str:
                 fund_data[-1] = {'day': fund_data[-1]['day'], 'close': fund_current, 'high': fund_current, 'low': fund_current}

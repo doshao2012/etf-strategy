@@ -29,7 +29,8 @@ def get_etf_data(market, code, days=260):
     if not data:
         return None, None, None
     current_price, today_pct, _, _ = get_realtime_price(market, code)
-    if current_price:
+    # 仅交易日（周一至周五）才更新实时数据
+    if datetime.now().weekday() < 5 and current_price:
         data[-1] = {'day': data[-1]['day'], 'close': current_price, 'high': current_price, 'low': current_price}
     return data, current_price, today_pct
 
