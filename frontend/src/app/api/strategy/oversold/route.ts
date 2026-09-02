@@ -20,6 +20,7 @@ export async function GET() {
       code: etf.code,
       name: etf.name,
       currentPrice: etf.current_price,
+      todayChange: etf.today_pct,
       ma10: etf.ma10,
       lowerBand: etf.lower_band,
       distanceToLower: etf.dist_to_lower,

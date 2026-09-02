@@ -538,8 +538,8 @@ def get_historical_data(etf_code: str, market: str, count: int = 10) -> pd.DataF
     return pd.DataFrame()
 
 
-def get_realtime_price(etf_code: str, market: str) -> Optional[float]:
-    """获取实时价格"""
+def get_realtime_price(etf_code: str, market: str) -> tuple[Optional[float], Optional[float]]:
+    """获取实时价格和涨跌幅"""
     try:
         if market == 'sz':
             url = f"http://qt.gtimg.cn/q=sz{etf_code}"
@@ -552,10 +552,12 @@ def get_realtime_price(etf_code: str, market: str) -> Optional[float]:
                 data_str = content.split('"')[1]
                 fields = data_str.split('~')
                 if len(fields) >= 4 and fields[3]:
-                    return float(fields[3])
+                    price = float(fields[3])
+                    today_pct = float(fields[32]) if len(fields) > 32 and fields[32] else None
+                    return price, today_pct
     except Exception:
         pass
-    return None
+    return None, None
 
 
 def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
@@ -568,7 +570,7 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
             if historical_df.empty or len(historical_df) < 10:
                 return None
             
-            current_price = get_realtime_price(etf['code'], etf['market'])
+            current_price, today_pct = get_realtime_price(etf['code'], etf['market'])
             if current_price is None:
                 return None
             
@@ -592,6 +594,7 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
                 'name': etf['name'],
                 'market': etf['market'],
                 'current_price': round(current_price, 3),
+                'today_pct': today_pct,
                 'ma10': round(dynamic_ma10, 3),
                 'lower_band': round(lower_band, 3),
                 'dist_to_lower': round(dist_to_lower, 2),
