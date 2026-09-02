@@ -57,6 +57,7 @@ interface OversoldETF {
   code: string;
   name: string;
   currentPrice: number;
+  todayChange: number;
   ma10: number;
   lowerBand: number;
   distanceToLower: number;
@@ -326,10 +327,16 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
         </div>
 
         {/* 核心指标 */}
-        <div className="grid grid-cols-2 gap-2 mb-3">
+        <div className="grid grid-cols-3 gap-2 mb-3">
           <div className="bg-orange-50 rounded-lg p-3">
             <p className="text-xs text-slate-500 mb-1">当前价格</p>
             <p className="text-xl font-bold text-orange-500">{(etf.currentPrice ?? 0).toFixed(3)}</p>
+          </div>
+          <div className="bg-slate-50 rounded-lg p-3">
+            <p className="text-xs text-slate-500 mb-1">今日涨跌幅</p>
+            <p className={`text-xl font-bold ${(etf.todayChange ?? 0) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+              {(etf.todayChange ?? 0) >= 0 ? '+' : ''}{(etf.todayChange ?? 0).toFixed(2)}%
+            </p>
           </div>
           <div className="bg-emerald-50 rounded-lg p-3">
             <p className="text-xs text-slate-500 mb-1">ENE下轨</p>

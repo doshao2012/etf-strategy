@@ -40,6 +40,7 @@ export interface OversoldETF {
   code: string;
   name: string;
   currentPrice: number;
+  todayChange: number;
   ma10: number;
   lowerBand: number;
   distanceToLower: number;
