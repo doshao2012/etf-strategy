@@ -28,7 +28,7 @@ VERBOSE = False
 MIN_MONEY_W = 10000  # 最小日均成交额（万元）- 1亿
 LOOKBACK_DAYS = 20  # 成交额统计天数
 MA_PERIOD = 10  # MA周期
-ENE_LOWER_PCT = 0.09  # 下轨偏离度 9%
+ENE_LOWER_PCT = 0.1  # 下轨偏离度 10%
 
 # 缓存文件路径
 VOLUME_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'volume_cache.json')

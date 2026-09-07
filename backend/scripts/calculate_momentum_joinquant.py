@@ -301,12 +301,12 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         ma10 = float(np.mean(all_closes[-10:])) if len(all_closes) >= 10 else None
         ma20 = float(np.mean(all_closes[-20:])) if len(all_closes) >= 20 else None
 
-        # 5. ENE 轨道 (N=10, M1=11, M2=9)
-        # MA10 × 1.11 = 上轨, MA10 × 0.91 = 下轨
+        # 5. ENE 轨道 (N=10, M1=10, M2=10)
+        # MA10 × 1.1 = 上轨, MA10 × 0.9 = 下轨
         ma10_ene = float(np.mean(all_closes[-10:])) if len(all_closes) >= 10 else None
         if ma10_ene is not None:
-            ene_upper = round(ma10_ene * 1.11, 3)
-            ene_lower = round(ma10_ene * 0.91, 3)
+            ene_upper = round(ma10_ene * 1.1, 3)
+            ene_lower = round(ma10_ene * 0.9, 3)
             ene_dist_upper = round((ene_upper - current_price) / current_price * 100, 2)
             ene_dist_lower = round((current_price - ene_lower) / current_price * 100, 2)
             ene_warn_upper = ene_dist_upper <= 1.0
