@@ -344,18 +344,32 @@ def get_etf_volume(etf_code: str, market: str) -> Optional[float]:
     try:
         # 获取最近9天的K线数据（成交额用最后一天，K线缓存给后续分析）
         symbol = f"{market}{etf_code}"
-        url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={symbol}&scale=240&ma=no&datalen=10"
+        url = f"http://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get?param={symbol},day,,,10,qfq"
 
-        response = requests.get(url, timeout=3)
+        response = requests.get(url, timeout=5)
         if response.status_code == 200:
-            data = response.json()
-            if data and len(data) > 0:
-                # 缓存K线数据供后续分析复用
+            result = response.json()
+            klines = result.get('data', {}).get(symbol, {}).get('qfqday', [])
+            # 部分ETF没有前复权数据，降级使用不复权
+            if not klines:
+                klines = result.get('data', {}).get(symbol, {}).get('day', [])
+            if klines and len(klines) > 0:
+                # 转换为统一格式并缓存
+                data = []
+                for k in klines:
+                    data.append({
+                        'day': k[0],
+                        'close': k[2],
+                        'high': k[3],
+                        'low': k[4],
+                        'open': k[1],
+                        'volume': k[5]
+                    })
                 _kline_cache[symbol] = data
 
-                # 最后一天算成交额
+                # 最后一天算成交额（腾讯API成交量单位是手，转为股再计算）
                 item = data[-1]
-                volume = float(item.get('volume', 0))
+                volume = float(item.get('volume', 0)) * 100  # 手→股
                 close = float(item.get('close', 0))
                 money = volume * close / 10000
                 return money
@@ -520,14 +534,27 @@ def get_historical_data(etf_code: str, market: str, count: int = 10) -> pd.DataF
             return df
 
         # 3. 缓存不够再从API获取
-        if market == 'sz':
-            url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=sz{etf_code}&scale=240&ma=no&datalen={count}"
-        else:
-            url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=sh{etf_code}&scale=240&ma=no&datalen={count}"
-        response = requests.get(url, timeout=3)
+        symbol = f"{market}{etf_code}"
+        url = f"http://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get?param={symbol},day,,,{count+10},qfq"
+        response = requests.get(url, timeout=5)
         if response.status_code == 200:
-            data = response.json()
-            if data:
+            result = response.json()
+            klines = result.get('data', {}).get(symbol, {}).get('qfqday', [])
+            # 部分ETF没有前复权数据，降级使用不复权
+            if not klines:
+                klines = result.get('data', {}).get(symbol, {}).get('day', [])
+            if klines:
+                # 转换为统一格式
+                data = []
+                for k in klines:
+                    data.append({
+                        'day': k[0],
+                        'close': k[2],
+                        'high': k[3],
+                        'low': k[4],
+                        'open': k[1],
+                        'volume': k[5]
+                    })
                 _kline_cache[symbol] = data  # 回写到内存缓存
                 df = pd.DataFrame(data[-count:])
                 df['date'] = pd.to_datetime(df['day'])

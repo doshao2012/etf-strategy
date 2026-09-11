@@ -79,19 +79,36 @@ def get_historical_prices(market, code, days=30):
             return [{'day': item['day'], 'close': float(item['close']), 'high': float(item['high']), 'low': float(item['low'])} for item in data[-days:]]
         print(f"缓存数据不足({len(data)}条<{days}条)，重新获取: {code}", file=sys.stderr)
     
-    # 从新浪获取历史数据
+    # 从腾讯API获取历史数据（前复权）
     try:
-        url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={market}{code}&scale=240&ma=no&datalen={days+30}"
+        symbol = f"{market}{code}"
+        url = f"http://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get?param={symbol},day,,,{days+30},qfq"
         
         response = requests.get(url, timeout=15)
-        content = response.text
-        
-        if not content or content == 'null':
+        if response.status_code != 200:
+            print(f"腾讯API返回异常状态码 {response.status_code}: {code}", file=sys.stderr)
             return []
         
-        data = json.loads(content)
-        if not data:
+        result = response.json()
+        klines = result.get('data', {}).get(symbol, {}).get('qfqday', [])
+        # 部分ETF（如新上市）没有前复权数据，降级使用不复权
+        if not klines:
+            klines = result.get('data', {}).get(symbol, {}).get('day', [])
+        if not klines:
+            print(f"腾讯API返回数据为空: {code}", file=sys.stderr)
             return []
+        
+        # 转换为统一格式：{day, close, high, low, open, volume}
+        data = []
+        for k in klines:
+            data.append({
+                'day': k[0],
+                'close': k[2],
+                'high': k[3],
+                'low': k[4],
+                'open': k[1],
+                'volume': k[5]
+            })
         
         # 保存到缓存
         cache[cache_key] = {'date': today, 'data': data}
