@@ -34,6 +34,10 @@ ENE_LOWER_PCT = 0.09  # 下轨偏离度 9%
 VOLUME_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'volume_cache.json')
 HISTORY_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'history_cache.json')
 KLINE_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'kline_cache.json')
+
+# 复用动量策略的数据获取函数
+sys.path.insert(0, os.path.dirname(__file__))
+from calculate_momentum_joinquant import get_historical_prices as _get_momentum_prices
 MAX_WORKERS = 20  # 并行请求数
 
 # 内存缓存：K线数据（filter_by_volume 时预取，calculate_oversold_analysis 复用）
@@ -496,11 +500,12 @@ def merge_duplicate_etfs(etf_list: List[Dict]) -> List[Dict]:
 
 
 def get_historical_data(etf_code: str, market: str, count: int = 10) -> pd.DataFrame:
-    """获取历史K线数据（优先从各级缓存读取）"""
+    """获取历史K线数据（优先动量策略缓存，最新数据从同源函数获取）"""
     try:
         symbol = f"{market}{etf_code}"
+        days = count + 5  # 多取5天，确保有足够数据
 
-        # 1. 优先用内存K线缓存（filter_by_volume 时预取）
+        # 1. 优先用内存K线缓存
         if symbol in _kline_cache and len(_kline_cache[symbol]) >= count:
             data = _kline_cache[symbol]
             df = pd.DataFrame(data[-count:])
@@ -509,17 +514,27 @@ def get_historical_data(etf_code: str, market: str, count: int = 10) -> pd.DataF
             log(f"内存缓存命中: {etf_code}")
             return df
 
-        # 2. 再从动量策略缓存读取
+        # 2. 复用动量策略的数据获取（含多层缓存+新浪API）
+        prices = _get_momentum_prices(market, etf_code, days)
+        if prices and len(prices) >= count:
+            _kline_cache[symbol] = prices  # 回写内存缓存
+            df = pd.DataFrame(prices[-count:])
+            df['date'] = pd.to_datetime(df['day'])
+            df['close'] = df['close'].astype(float)
+            log(f"动量缓存命中: {etf_code}")
+            return df
+
+        # 3. 再走原有磁盘缓存
         cached = get_historical_from_cache(etf_code, market)
         if cached and len(cached) >= count:
-            _kline_cache[symbol] = cached  # 回写到内存缓存
+            _kline_cache[symbol] = cached
             df = pd.DataFrame(cached[-count:])
             df['date'] = pd.to_datetime(df['day'])
             df['close'] = df['close'].astype(float)
             log(f"磁盘缓存命中: {etf_code}")
             return df
 
-        # 3. 缓存不够再从API获取
+        # 4. 最后尝试新浪API直取
         if market == 'sz':
             url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=sz{etf_code}&scale=240&ma=no&datalen={count}"
         else:
@@ -528,7 +543,7 @@ def get_historical_data(etf_code: str, market: str, count: int = 10) -> pd.DataF
         if response.status_code == 200:
             data = response.json()
             if data:
-                _kline_cache[symbol] = data  # 回写到内存缓存
+                _kline_cache[symbol] = data
                 df = pd.DataFrame(data[-count:])
                 df['date'] = pd.to_datetime(df['day'])
                 df['close'] = df['close'].astype(float)
