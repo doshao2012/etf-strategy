@@ -500,41 +500,28 @@ def merge_duplicate_etfs(etf_list: List[Dict]) -> List[Dict]:
 
 
 def get_historical_data(etf_code: str, market: str, count: int = 10) -> pd.DataFrame:
-    """获取历史K线数据（优先动量策略缓存，最新数据从同源函数获取）"""
+    """获取历史K线数据（轻量：新浪直取→磁盘缓存→动量缓存兜底）"""
     try:
         symbol = f"{market}{etf_code}"
-        days = count + 5  # 多取5天，确保有足够数据
 
-        # 1. 优先用内存K线缓存
+        # 1. 内存K线缓存（最快）
         if symbol in _kline_cache and len(_kline_cache[symbol]) >= count:
             data = _kline_cache[symbol]
             df = pd.DataFrame(data[-count:])
             df['date'] = pd.to_datetime(df['day'])
             df['close'] = df['close'].astype(float)
-            log(f"内存缓存命中: {etf_code}")
             return df
 
-        # 2. 复用动量策略的数据获取（含多层缓存+新浪API）
-        prices = _get_momentum_prices(market, etf_code, days)
-        if prices and len(prices) >= count:
-            _kline_cache[symbol] = prices  # 回写内存缓存
-            df = pd.DataFrame(prices[-count:])
-            df['date'] = pd.to_datetime(df['day'])
-            df['close'] = df['close'].astype(float)
-            log(f"动量缓存命中: {etf_code}")
-            return df
-
-        # 3. 再走原有磁盘缓存
+        # 2. 走原有磁盘缓存（history_cache.json）
         cached = get_historical_from_cache(etf_code, market)
         if cached and len(cached) >= count:
             _kline_cache[symbol] = cached
             df = pd.DataFrame(cached[-count:])
             df['date'] = pd.to_datetime(df['day'])
             df['close'] = df['close'].astype(float)
-            log(f"磁盘缓存命中: {etf_code}")
             return df
 
-        # 4. 最后尝试新浪API直取
+        # 3. 新浪API直取（轻量，仅count条）
         if market == 'sz':
             url = f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=sz{etf_code}&scale=240&ma=no&datalen={count}"
         else:
@@ -548,6 +535,15 @@ def get_historical_data(etf_code: str, market: str, count: int = 10) -> pd.DataF
                 df['date'] = pd.to_datetime(df['day'])
                 df['close'] = df['close'].astype(float)
                 return df
+
+        # 4. 动量策略缓存兜底（仅当以上都失败时，会fetch 40+条）
+        prices = _get_momentum_prices(market, etf_code, count + 5)
+        if prices and len(prices) >= count:
+            _kline_cache[symbol] = prices
+            df = pd.DataFrame(prices[-count:])
+            df['date'] = pd.to_datetime(df['day'])
+            df['close'] = df['close'].astype(float)
+            return df
     except Exception:
         pass
     return pd.DataFrame()
