@@ -538,8 +538,8 @@ def get_historical_data(etf_code: str, market: str, count: int = 10) -> pd.DataF
     return pd.DataFrame()
 
 
-def get_realtime_price(etf_code: str, market: str) -> tuple[Optional[float], Optional[float]]:
-    """获取实时价格和涨跌幅"""
+def get_realtime_price(etf_code: str, market: str) -> tuple[Optional[float], Optional[float], Optional[str]]:
+    """获取实时价格、涨跌幅和交易日期(YYYY-MM-DD)"""
     try:
         if market == 'sz':
             url = f"http://qt.gtimg.cn/q=sz{etf_code}"
@@ -554,10 +554,13 @@ def get_realtime_price(etf_code: str, market: str) -> tuple[Optional[float], Opt
                 if len(fields) >= 4 and fields[3]:
                     price = float(fields[3])
                     today_pct = float(fields[32]) if len(fields) > 32 and fields[32] else None
-                    return price, today_pct
+                    trade_date = fields[30][:8] if len(fields) > 30 and fields[30] else None
+                    if trade_date:
+                        trade_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+                    return price, today_pct, trade_date
     except Exception:
         pass
-    return None, None
+    return None, None, None
 
 
 def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
@@ -570,21 +573,23 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
             if historical_df.empty or len(historical_df) < 10:
                 return None
             
-            current_price, today_pct = get_realtime_price(etf['code'], etf['market'])
+            current_price, today_pct, trade_date = get_realtime_price(etf['code'], etf['market'])
             if current_price is None:
                 return None
             
-            # 检查最后一条K线是否包含今天
+            # 检查腾讯交易日期与K线最新日期是否一致（判断是否交易日）
             closes = historical_df['close'].astype(float)
-            today_str = datetime.now().strftime('%Y-%m-%d')
             last_day = str(historical_df['day'].iloc[-1]) if 'day' in historical_df.columns else ''
             
-            if last_day.startswith(today_str):
-                # 收盘后：K线已包含今天，直接取10日均线
+            if trade_date and trade_date == last_day:
+                # 交易日且K线已包含今天（收盘后），直接取10日均线
                 dynamic_ma10 = closes.sum() / 10
-            else:
-                # 盘中：K线不含今天，去掉最旧的一条，加入实时价（保持10条）
+            elif trade_date and trade_date != last_day:
+                # 交易日盘中：K线不含今天，去掉最旧的一条，加入实时价（保持10条）
                 dynamic_ma10 = (closes.sum() - closes.iloc[0] + current_price) / 10
+            else:
+                # 非交易日（周末/节假日），使用原始K线数据
+                dynamic_ma10 = closes.sum() / 10
             
             lower_band = dynamic_ma10 * (1 - ENE_LOWER_PCT)
             dist_to_lower = (current_price - lower_band) / lower_band * 100
