@@ -308,10 +308,10 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         elif score < score_threshold:
             status = "分值过低"
 
-        # 3. 预估动量得分
+        # 3. 预估动量得分 & 预估收益得分
         # 假设明天价格不变，去掉最老的价格，加上当前价格，重新计算
         estimated_prices = np.append(prices[1:], current_price)
-        estimated_score, _, _, _ = calculate_momentum(estimated_prices)
+        estimated_score, _, estimated_ann_return, _ = calculate_momentum(estimated_prices)
 
         # 4. 均线计算（直接用 data 中已有的收盘价）
         all_closes = [d['close'] for d in data]
@@ -364,6 +364,7 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
             'today_pct': round(today_pct, 2),
             'status': status,
             'ann_return': round(ann_return, 4),
+            'estimated_ann_return': round(estimated_ann_return, 4),
             'slope': round(slope, 6),
             'ma10': round(ma10, 3) if ma10 is not None else None,
             'ma20': round(ma20, 3) if ma20 is not None else None,

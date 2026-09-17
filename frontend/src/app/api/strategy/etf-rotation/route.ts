@@ -31,6 +31,7 @@ export async function GET() {
       estimatedScore: etf.estimated_score ?? 0,
       rSquared: etf.r_squared ?? 0,
       annualReturn: etf.ann_return ?? 0,
+      estimatedAnnReturn: etf.estimated_ann_return ?? 0,
       price: etf.price ?? 0,
       todayChange: etf.today_pct ?? 0,
       status: etf.status || '未知',

@@ -31,6 +31,7 @@ interface RotationETF {
   estimatedScore: number;  // 预估动量得分
   rSquared: number;
   annualReturn: number;     // 年化收益率（收益得分）
+  estimatedAnnReturn: number;  // 预估收益得分
   price: number;
   todayChange: number;
   status: string;
@@ -97,7 +98,7 @@ interface OversoldResponse {
 function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   // 操作标签：清仓 > 警戒 > 加仓（优先级）
-  const actionTag = etf.belowMa20 ? '清仓' : etf.belowMa10 || etf.eneWarnUpper || etf.atrAlarm ? '警戒' : etf.eneWarnLower ? '加仓' : null;
+  const actionTag = etf.belowMa20 ? '清仓' : etf.belowMa10 || etf.eneWarnUpper || etf.atrAlarm || (etf.annualReturn ?? 0) > 0.03 ? '警戒' : etf.eneWarnLower ? '加仓' : null;
   const actionTagColor = actionTag === '清仓' ? 'bg-red-500' : actionTag === '警戒' ? 'bg-amber-500' : 'bg-emerald-500';
 
   const isWarning = etf.status.includes('拦截') || etf.status.includes('过低');
@@ -162,9 +163,9 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
                   <button onClick={() => setSelectedDay(null)} className="ml-auto text-blue-500 hover:text-blue-700">返回当前</button>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
+                  <div><span className="text-slate-500">收益</span> <span className="font-medium">{(etf.dailyHistory[selectedDay].annualReturn ?? 0).toFixed(4)}</span></div>
                   <div><span className="text-slate-500">得分</span> <span className="font-medium">{(etf.dailyHistory[selectedDay].score ?? 0).toFixed(4)}</span></div>
                   <div><span className="text-slate-500">R²</span> <span className="font-medium">{(etf.dailyHistory[selectedDay].rSquared ?? 0).toFixed(3)}</span></div>
-                  <div><span className="text-slate-500">收益</span> <span className="font-medium">{(etf.dailyHistory[selectedDay].annualReturn ?? 0).toFixed(4)}</span></div>
                   <div><span className="text-slate-500">涨跌幅</span> <span className={`font-medium ${(etf.dailyHistory[selectedDay].change ?? 0) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>{etf.dailyHistory[selectedDay].change > 0 ? '+' : ''}{(etf.dailyHistory[selectedDay].change ?? 0).toFixed(2)}%</span></div>
                 </div>
               </div>
@@ -181,7 +182,7 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
               {(etf.annualReturn ?? 0).toFixed(4)}
             </p>
             <p className={`text-xs font-medium mt-1 ${(etf.annualReturn ?? 0) >= 0 ? 'text-blue-500' : 'text-red-400'}`}>
-              预 {((etf.annualReturn) ?? 0).toFixed(4)}
+              预 {((etf.estimatedAnnReturn) ?? 0).toFixed(4)}
             </p>
           </div>
           {/* 动量得分 */}
@@ -906,13 +907,13 @@ export default function ETFRotationPage() {
                       <div className="bg-red-50 rounded p-2">
                         <p className="font-medium text-red-600 text-xs">清仓</p>
                         <p className="text-slate-500 text-[11px] leading-relaxed">
-  当日大跌<br/>分数不是第一
+  当日大跌
 </p>
                       </div>
                       <div className="bg-amber-50 rounded p-2">
                         <p className="font-medium text-amber-600 text-xs">警戒</p>
                         <p className="text-slate-500 text-[11px] leading-relaxed">
-  ENE上限<br/>ATR止盈
+  ENE上限<br/>ATR止盈<br/>收益得分超过3
 </p>
                       </div>
                       <div className="bg-emerald-50 rounded p-2">
