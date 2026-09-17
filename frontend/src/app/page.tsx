@@ -96,9 +96,9 @@ interface OversoldResponse {
 // 趋势轮动卡片 - 按参考图设计
 function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
-  // 操作标签：清仓 > 减仓 > 加仓（优先级）
-  const actionTag = etf.belowMa20 || etf.atrAlarm ? '清仓' : etf.belowMa10 || etf.eneWarnUpper ? '减仓' : etf.eneWarnLower ? '加仓' : null;
-  const actionTagColor = actionTag === '清仓' ? 'bg-red-500' : actionTag === '减仓' ? 'bg-amber-500' : 'bg-emerald-500';
+  // 操作标签：清仓 > 警戒 > 加仓（优先级）
+  const actionTag = etf.belowMa20 ? '清仓' : etf.belowMa10 || etf.eneWarnUpper || etf.atrAlarm ? '警戒' : etf.eneWarnLower ? '加仓' : null;
+  const actionTagColor = actionTag === '清仓' ? 'bg-red-500' : actionTag === '警戒' ? 'bg-amber-500' : 'bg-emerald-500';
 
   const isWarning = etf.status.includes('拦截') || etf.status.includes('过低');
 
@@ -174,6 +174,16 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
 
         {/* 核心指标：四个小卡片 */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+          {/* 收益得分（年化收益率） */}
+          <div className="bg-blue-50 rounded-lg p-3 text-center">
+            <p className="text-xs text-slate-500 mb-1">收益得分</p>
+            <p className={`text-xl font-bold ${(etf.annualReturn ?? 0) >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
+              {(etf.annualReturn ?? 0).toFixed(4)}
+            </p>
+            <p className={`text-xs font-medium mt-1 ${(etf.annualReturn ?? 0) >= 0 ? 'text-blue-500' : 'text-red-400'}`}>
+              预 {((etf.annualReturn) ?? 0).toFixed(4)}
+            </p>
+          </div>
           {/* 动量得分 */}
           <div className="bg-emerald-50 rounded-lg p-3 text-center">
             <p className="text-xs text-slate-500 mb-1">动量得分</p>
@@ -183,14 +193,6 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
             <p className={`text-xs font-medium mt-1 ${(etf.estimatedScore ?? 0) >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
               预 {((etf.estimatedScore) ?? etf.score ?? 0).toFixed(4)}
             </p>
-          </div>
-          {/* 收益得分（年化收益率） */}
-          <div className="bg-blue-50 rounded-lg p-3 text-center">
-            <p className="text-xs text-slate-500 mb-1">收益得分</p>
-            <p className={`text-xl font-bold ${(etf.annualReturn ?? 0) >= 0 ? 'text-blue-600' : 'text-red-500'}`}>
-              {(etf.annualReturn ?? 0).toFixed(4)}
-            </p>
-            <p className="text-xs text-slate-400 mt-1">R²=1</p>
           </div>
           {/* 稳定性 R² */}
           <div className="bg-purple-50 rounded-lg p-3 text-center">
@@ -904,13 +906,13 @@ export default function ETFRotationPage() {
                       <div className="bg-red-50 rounded p-2">
                         <p className="font-medium text-red-600 text-xs">清仓</p>
                         <p className="text-slate-500 text-[11px] leading-relaxed">
-  当日大跌<br/>跌破20日线<br/>分数不是第一<br/>ATR止盈
+  当日大跌<br/>分数不是第一
 </p>
                       </div>
                       <div className="bg-amber-50 rounded p-2">
-                        <p className="font-medium text-amber-600 text-xs">减仓</p>
+                        <p className="font-medium text-amber-600 text-xs">警戒</p>
                         <p className="text-slate-500 text-[11px] leading-relaxed">
-  跌破10日线<br/>ENE上限
+  ENE上限<br/>ATR止盈
 </p>
                       </div>
                       <div className="bg-emerald-50 rounded p-2">
@@ -922,7 +924,7 @@ export default function ETFRotationPage() {
                       <div className="bg-blue-50 rounded p-2">
                         <p className="font-medium text-blue-600 text-xs">分数上限</p>
                         <p className="text-slate-500 text-[11px] leading-relaxed">
-  保守选择3<br/>按照95%上限
+  常规选择5<br/>保守选择3
 </p>
                       </div>
                     </div>
@@ -956,7 +958,7 @@ export default function ETFRotationPage() {
                   <OversoldCard key={etf.code} etf={etf} rank={index + 1} />
                 ))
               ) : (
-                (rotationData?.data.etfs || []).map((etf, index) => (
+                [...(rotationData?.data.etfs || [])].sort((a, b) => (b.annualReturn ?? -999) - (a.annualReturn ?? -999)).map((etf, index) => (
                   <RotationCard key={etf.code} etf={etf} rank={index + 1} />
                 ))
               )}
