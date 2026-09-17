@@ -98,7 +98,8 @@ interface OversoldResponse {
 function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   // 操作标签：清仓 > 警戒 > 加仓（优先级）
-  const actionTag = etf.belowMa20 ? '清仓' : etf.belowMa10 || etf.eneWarnUpper || etf.atrAlarm || (etf.annualReturn ?? 0) > 0.03 ? '警戒' : etf.eneWarnLower ? '加仓' : null;
+  // 清仓：跌幅拦截状态；警戒：跌破20日线或ENE上轨或ATR止盈或收益得分超过3
+  const actionTag = etf.status.includes('拦截') ? '清仓' : etf.belowMa20 || etf.eneWarnUpper || etf.atrAlarm || (etf.annualReturn ?? 0) > 0.03 ? '警戒' : etf.eneWarnLower ? '加仓' : null;
   const actionTagColor = actionTag === '清仓' ? 'bg-red-500' : actionTag === '警戒' ? 'bg-amber-500' : 'bg-emerald-500';
 
   const isWarning = etf.status.includes('拦截') || etf.status.includes('过低');
@@ -907,13 +908,13 @@ export default function ETFRotationPage() {
                       <div className="bg-red-50 rounded p-2">
                         <p className="font-medium text-red-600 text-xs">清仓</p>
                         <p className="text-slate-500 text-[11px] leading-relaxed">
-  当日大跌
+  跌幅拦截状态
 </p>
                       </div>
                       <div className="bg-amber-50 rounded p-2">
                         <p className="font-medium text-amber-600 text-xs">警戒</p>
                         <p className="text-slate-500 text-[11px] leading-relaxed">
-  ENE上限<br/>ATR止盈<br/>收益得分超过3
+  跌破20日线<br/>ENE上轨<br/>ATR止盈<br/>收益得分超过3
 </p>
                       </div>
                       <div className="bg-emerald-50 rounded p-2">
