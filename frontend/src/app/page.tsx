@@ -99,7 +99,7 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   // 操作标签：清仓 > 警戒 > 加仓（优先级）
   // 清仓：跌幅拦截状态；警戒：跌破20日线或ENE上轨或ATR止盈或收益得分超过3
-  const actionTag = etf.status.includes('拦截') ? '清仓' : etf.belowMa20 || etf.eneWarnUpper || etf.atrAlarm || (etf.annualReturn ?? 0) > 0.03 ? '警戒' : etf.eneWarnLower ? '加仓' : null;
+  const actionTag = etf.status.includes('拦截') ? '清仓' : etf.belowMa20 || etf.eneWarnUpper || etf.atrAlarm || (etf.annualReturn ?? 0) > 3.0 ? '警戒' : etf.eneWarnLower ? '加仓' : null;
   const actionTagColor = actionTag === '清仓' ? 'bg-red-500' : actionTag === '警戒' ? 'bg-amber-500' : 'bg-emerald-500';
 
   const isWarning = etf.status.includes('拦截') || etf.status.includes('过低');
