@@ -305,7 +305,7 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         if min(ratios) < loss_limit:
             status = "⚠️ 跌幅拦截"
             score = -0.01
-        elif score < score_threshold:
+        elif ann_return < -0.05:
             status = "分值过低"
 
         # 3. 预估动量得分 & 预估收益得分
