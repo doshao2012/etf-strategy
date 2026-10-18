@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getETFStrategy, getOversoldStrategy, getMeanReversionStrategy, getMa200TrendStrategy, getEtfConfigs, updateEtfConfig, createEtfConfig, deleteEtfConfig, type EtfConfig, type MeanReversionETF, type MeanReversionResponse, type Ma200TrendResponse } from '@/lib/api';
 import Ma200TrendCard from '@/components/ma200-trend-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -720,30 +720,56 @@ export default function ETFRotationPage() {
   const [currentStrategy, setCurrentStrategy] = useState<StrategyType>('rotation');
   const [showConfig, setShowConfig] = useState(false);
 
+  // 请求序号 + 当前策略的 ref，用于在 fetchData 里判断响应是否过期
+  const reqSeqRef = useRef(0);
+  const strategyRef = useRef<StrategyType>(currentStrategy);
+  // 已就绪数据所属的策略：只有当它等于当前策略时，才允许渲染这份数据。
+  // 仅靠 loading 无法避免残留 —— 切回旧策略时旧数据仍在 state 里，会瞬间命中并跳过骨架屏。
+  const [readyStrategy, setReadyStrategy] = useState<StrategyType | null>(null);
+
+  // 切换策略：立即让在途请求失效，并同步 ref，避免旧策略响应回填到页面
+  const handleStrategyChange = (next: StrategyType) => {
+    if (next === currentStrategy) return;
+    reqSeqRef.current += 1;      // 让所有在途请求失效
+    strategyRef.current = next;  // 同步更新，fetchData 里据此判断
+    setReadyStrategy(null);      // 关键：立刻作废"已就绪"标记，强制走骨架屏
+    setCurrentStrategy(next);
+    setError(null);
+    setLoading(true);            // 立即进入骨架屏，不等 useEffect
+  };
+
   const fetchData = async () => {
+    // 请求序号：快速切换 tab 时，先发出的请求可能后返回，必须丢弃过期响应
+    const reqId = ++reqSeqRef.current;
+    const strategyAtRequest = currentStrategy;
+    strategyRef.current = strategyAtRequest;
+    const isStale = () => reqId !== reqSeqRef.current || strategyAtRequest !== strategyRef.current;
+
     setLoading(true);
     setError(null);
-    
+
     try {
-      if (currentStrategy === 'rotation') {
+      if (strategyAtRequest === 'rotation') {
         const rotation = await getETFStrategy();
-        setRotationData(rotation as RotationResponse);
-      } else if (currentStrategy === 'oversold') {
+        if (!isStale()) setRotationData(rotation as RotationResponse);
+      } else if (strategyAtRequest === 'oversold') {
         const oversold = await getOversoldStrategy();
-        setOversoldData(oversold as OversoldResponse);
-      } else if (currentStrategy === 'meanReversion') {
+        if (!isStale()) setOversoldData(oversold as OversoldResponse);
+      } else if (strategyAtRequest === 'meanReversion') {
         const mr = await getMeanReversionStrategy();
-        setMeanReversionData(mr as MeanReversionResponse);
+        if (!isStale()) setMeanReversionData(mr as MeanReversionResponse);
       } else {
         const trend = await getMa200TrendStrategy();
-        setMa200TrendData(trend as Ma200TrendResponse);
+        if (!isStale()) setMa200TrendData(trend as Ma200TrendResponse);
       }
-      setLastUpdate(new Date().toLocaleTimeString('zh-CN'));
+      if (!isStale()) setLastUpdate(new Date().toLocaleTimeString('zh-CN'));
+      if (!isStale()) setReadyStrategy(strategyAtRequest);  // 数据与策略绑定，成功后标记就绪
     } catch (err: any) {
+      if (isStale()) return;
       console.error('获取数据失败:', err);
       setError(err.message || '获取数据失败');
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   };
 
@@ -764,13 +790,21 @@ export default function ETFRotationPage() {
   const isOversoldMode = currentStrategy === 'oversold';
   const isMeanReversionMode = currentStrategy === 'meanReversion';
   const isMa200TrendMode = currentStrategy === 'ma200Trend';
-  const currentData = isMa200TrendMode
-    ? ma200TrendData
-    : isMeanReversionMode
-    ? meanReversionData
-    : isOversoldMode
-    ? oversoldData
-    : rotationData;
+
+  // 数据就绪性：readyStrategy 必须与当前策略一致，否则视为未就绪。
+  // 这样切回任何策略都不会复用到上一轮的旧对象（残留的根因）。
+  const isReady = readyStrategy === currentStrategy;
+
+  // 按策略绑定的数据视图：未就绪时一律为 null，渲染层拿不到旧数据。
+  const rotationView = isReady && !isMa200TrendMode && !isMeanReversionMode && !isOversoldMode ? rotationData : null;
+  const oversoldView = isReady && isOversoldMode ? oversoldData : null;
+  const meanReversionView = isReady && isMeanReversionMode ? meanReversionData : null;
+  const ma200TrendView = isReady && isMa200TrendMode ? ma200TrendData : null;
+
+  const currentData = ma200TrendView || meanReversionView || oversoldView || rotationView;
+
+  // 当前策略数据尚未就绪时，一律显示骨架屏（即使 loading 已为 false）
+  const showSkeleton = loading || !isReady || !currentData;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -786,7 +820,7 @@ export default function ETFRotationPage() {
             </div>
             
             <div className="flex items-center gap-2">
-              <Select value={currentStrategy} onValueChange={(v) => setCurrentStrategy(v as StrategyType)}>
+              <Select value={currentStrategy} onValueChange={(v) => handleStrategyChange(v as StrategyType)}>
                 <SelectTrigger className="w-[120px] h-9 bg-slate-100 border-0">
                   <SelectValue />
                 </SelectTrigger>
@@ -823,7 +857,7 @@ export default function ETFRotationPage() {
 
       <main className="container mx-auto px-4 py-6">
         {/* Content */}
-        {loading && !currentData ? (
+        {showSkeleton ? (
           <div>
             {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
           </div>
@@ -846,10 +880,10 @@ export default function ETFRotationPage() {
                       <span className="text-sm font-medium text-slate-700">
                         当前仓位
                       </span>
-                      <span className={`text-sm font-bold ${ma200TrendData?.data.state.current === 1 ? 'text-red-600' : ma200TrendData?.data.state.current === 2 ? 'text-blue-600' : 'text-slate-500'}`}>
-                        {ma200TrendData?.data.state.currentName || '-'}
+                      <span className={`text-sm font-bold ${ma200TrendView?.data.state.current === 1 ? 'text-red-600' : ma200TrendView?.data.state.current === 2 ? 'text-blue-600' : 'text-slate-500'}`}>
+                        {ma200TrendView?.data.state.currentName || '-'}
                       </span>
-                      {ma200TrendData?.data.state.changed && (
+                      {ma200TrendView?.data.state.changed && (
                         <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">
                           今日有变化
                         </span>
@@ -862,7 +896,7 @@ export default function ETFRotationPage() {
                         信号分布
                       </span>
                       {(() => {
-                        const etfs = meanReversionData?.data.etfs || [];
+                        const etfs = meanReversionView?.data.etfs || [];
                         const counts = { '强烈买入': 0, '建议买入': 0, '观察/持有': 0, '建议卖出': 0, '强烈卖出': 0 };
                         etfs.forEach(e => { if (e.signal in counts) (counts as Record<string, number>)[e.signal]++; });
                         return (
@@ -884,15 +918,15 @@ export default function ETFRotationPage() {
                       <span className="text-sm font-bold text-emerald-600">
                         {(() => {
                           // 趋势轮动：找状态正常且排名第一的
-                          if (!isOversoldMode && rotationData?.data.etfs) {
-                            const normalEtf = rotationData.data.etfs.find((etf, idx) => 
+                          if (!isOversoldMode && rotationView?.data.etfs) {
+                            const normalEtf = rotationView.data.etfs.find((etf, idx) => 
                               idx === 0 && etf.status === '正常'
                             );
                             return normalEtf ? normalEtf.name : '空仓';
                           }
                           // 超跌策略：使用第一个推荐
                           return isOversoldMode 
-                            ? (oversoldData?.data.recommend?.[0] || '空仓')
+                            ? (oversoldView?.data.recommend?.[0] || '空仓')
                             : '空仓';
                         })()}
                       </span>
@@ -990,15 +1024,15 @@ export default function ETFRotationPage() {
                 {isMa200TrendMode
                   ? '美股 QQQ / TQQQ'
                   : isMeanReversionMode
-                  ? `均值回归 (${meanReversionData?.data.etfs.length || 0})`
+                  ? `均值回归 (${meanReversionView?.data?.etfs?.length ?? 0})`
                   : isOversoldMode 
-                  ? `ENE下轨标的 (${oversoldData?.data.etfs.length || 0})` 
-                  : `趋势排名 (${rotationData?.data.etfs.length || 0})`}
+                  ? `ENE下轨标的 (${oversoldView?.data?.etfs?.length ?? 0})` 
+                  : `趋势排名 (${rotationView?.data?.etfs?.length ?? 0})`}
               </h2>
               
               {isMa200TrendMode ? (
-                ma200TrendData?.data ? (
-                  <Ma200TrendCard data={ma200TrendData.data} />
+                ma200TrendView?.data ? (
+                  <Ma200TrendCard data={ma200TrendView.data} />
                 ) : (
                   <Card className="p-8 text-center border-slate-200">
                     <p className="text-slate-500">暂无数据</p>
@@ -1006,7 +1040,7 @@ export default function ETFRotationPage() {
                 )
               ) : isMeanReversionMode ? (
                 (() => {
-                  const sorted = [...(meanReversionData?.data.etfs || [])].sort((a, b) => {
+                  const sorted = [...(meanReversionView?.data.etfs || [])].sort((a, b) => {
                     const order: Record<string, number> = { strongBuy: 0, suggestBuy: 1, hold: 2, suggestSell: 3, strongSell: 4 };
                     return (order[a.signalLevel] ?? 99) - (order[b.signalLevel] ?? 99);
                   });
@@ -1015,11 +1049,11 @@ export default function ETFRotationPage() {
                   ));
                 })()
               ) : isOversoldMode ? (
-                (oversoldData?.data.etfs || []).map((etf, index) => (
+                (oversoldView?.data.etfs || []).map((etf, index) => (
                   <OversoldCard key={etf.code} etf={etf} rank={index + 1} />
                 ))
               ) : (
-                [...(rotationData?.data.etfs || [])].sort((a, b) => (b.annualReturn ?? -999) - (a.annualReturn ?? -999)).map((etf, index) => (
+                [...(rotationView?.data.etfs || [])].sort((a, b) => (b.annualReturn ?? -999) - (a.annualReturn ?? -999)).map((etf, index) => (
                   <RotationCard key={etf.code} etf={etf} rank={index + 1} />
                 ))
               )}

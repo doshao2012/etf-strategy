@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
 
-// API 基础 URL - 从环境变量读取，移除尾随斜杠
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/, '');
+// API 基础 URL - 从环境变量读取，移除尾随斜杠；未配置时回退到本地后端
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
 
 export async function GET() {
   try {
     // 调用 FastAPI 后端服务
-    const response = await fetch(`${API_BASE_URL}/api/strategy/oversold`);
+    const response = await fetch(`${API_BASE_URL}/api/strategy/oversold`, {
+      cache: 'no-store',
+    });
     
     if (!response.ok) {
       throw new Error('获取超跌策略失败');
