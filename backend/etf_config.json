@@ -1,5 +1,11 @@
 [
-  {"code": "512890", "market": "sh", "name": "红利低波ETF"},
+  {
+    "code": "512890",
+    "market": "sh",
+    "name": "红利低波ETF",
+    "id": 10,
+    "isActive": true
+  },
   {
     "id": 1,
     "code": "159915",
