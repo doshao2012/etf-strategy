@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getETFStrategy, getOversoldStrategy, getMeanReversionStrategy, getEtfConfigs, updateEtfConfig, createEtfConfig, deleteEtfConfig, type EtfConfig, type MeanReversionETF, type MeanReversionResponse } from '@/lib/api';
+import { getETFStrategy, getOversoldStrategy, getMeanReversionStrategy, getMa200TrendStrategy, getEtfConfigs, updateEtfConfig, createEtfConfig, deleteEtfConfig, type EtfConfig, type MeanReversionETF, type MeanReversionResponse, type Ma200TrendResponse } from '@/lib/api';
+import Ma200TrendCard from '@/components/ma200-trend-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -12,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { RefreshCw, Settings, Plus, Pencil, Trash2, Shield } from 'lucide-react';
 
-type StrategyType = 'rotation' | 'oversold' | 'meanReversion';
+type StrategyType = 'rotation' | 'oversold' | 'meanReversion' | 'ma200Trend';
 
 // 趋势轮动ETF数据
 interface DailySnapshot {
@@ -711,6 +712,7 @@ export default function ETFRotationPage() {
   const [rotationData, setRotationData] = useState<RotationResponse | null>(null);
   const [oversoldData, setOversoldData] = useState<OversoldResponse | null>(null);
   const [meanReversionData, setMeanReversionData] = useState<MeanReversionResponse | null>(null);
+  const [ma200TrendData, setMa200TrendData] = useState<Ma200TrendResponse | null>(null);
   const [configs, setConfigs] = useState<EtfConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -729,9 +731,12 @@ export default function ETFRotationPage() {
       } else if (currentStrategy === 'oversold') {
         const oversold = await getOversoldStrategy();
         setOversoldData(oversold as OversoldResponse);
-      } else {
+      } else if (currentStrategy === 'meanReversion') {
         const mr = await getMeanReversionStrategy();
         setMeanReversionData(mr as MeanReversionResponse);
+      } else {
+        const trend = await getMa200TrendStrategy();
+        setMa200TrendData(trend as Ma200TrendResponse);
       }
       setLastUpdate(new Date().toLocaleTimeString('zh-CN'));
     } catch (err: any) {
@@ -758,7 +763,14 @@ export default function ETFRotationPage() {
 
   const isOversoldMode = currentStrategy === 'oversold';
   const isMeanReversionMode = currentStrategy === 'meanReversion';
-  const currentData = isMeanReversionMode ? meanReversionData : (isOversoldMode ? oversoldData : rotationData);
+  const isMa200TrendMode = currentStrategy === 'ma200Trend';
+  const currentData = isMa200TrendMode
+    ? ma200TrendData
+    : isMeanReversionMode
+    ? meanReversionData
+    : isOversoldMode
+    ? oversoldData
+    : rotationData;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -769,7 +781,7 @@ export default function ETFRotationPage() {
             <div>
               <h1 className="text-xl font-bold text-slate-800">ETF轮动策略</h1>
               <p className="text-xs text-slate-400">
-                {isMeanReversionMode ? '均值回归' : isOversoldMode ? '超跌策略' : '趋势轮动'}
+                {isMa200TrendMode ? '美股MA200趋势' : isMeanReversionMode ? '均值回归' : isOversoldMode ? '超跌策略' : '趋势轮动'}
               </p>
             </div>
             
@@ -782,6 +794,7 @@ export default function ETFRotationPage() {
                   <SelectItem value="rotation">趋势轮动</SelectItem>
                   <SelectItem value="meanReversion">均值回归</SelectItem>
                   <SelectItem value="oversold">超跌策略</SelectItem>
+                  <SelectItem value="ma200Trend">美股MA200</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -827,7 +840,22 @@ export default function ETFRotationPage() {
             <Card className="mb-4 bg-white border border-slate-200 shadow-sm">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between mb-3">
-                  {isMeanReversionMode ? (
+                  {isMa200TrendMode ? (
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-5 h-5 text-emerald-500" />
+                      <span className="text-sm font-medium text-slate-700">
+                        当前仓位
+                      </span>
+                      <span className={`text-sm font-bold ${ma200TrendData?.data.state.current === 1 ? 'text-red-600' : ma200TrendData?.data.state.current === 2 ? 'text-blue-600' : 'text-slate-500'}`}>
+                        {ma200TrendData?.data.state.currentName || '-'}
+                      </span>
+                      {ma200TrendData?.data.state.changed && (
+                        <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">
+                          今日有变化
+                        </span>
+                      )}
+                    </div>
+                  ) : isMeanReversionMode ? (
                     <div className="flex items-center gap-2">
                       <Shield className="w-5 h-5 text-emerald-500" />
                       <span className="text-sm font-medium text-slate-700 mr-2">
@@ -875,7 +903,28 @@ export default function ETFRotationPage() {
                   </span>
                 </div>
                 {/* 规则说明 */}
-                {isMeanReversionMode ? (
+                {isMa200TrendMode ? (
+                  <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1">
+                    <p className="font-medium text-slate-700 mb-1">操作规则：只看一个数 ratio = QQQ 价格 / QQQ 的 MA200</p>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <div className="bg-slate-100 rounded p-2">
+                        <p className="font-medium text-slate-600 text-xs">下轨 1.01</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">跌破 → 清仓<br/>站上 → 买入 TQQQ</p>
+                      </div>
+                      <div className="bg-red-50 rounded p-2">
+                        <p className="font-medium text-red-600 text-xs">上轨 1.14</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">涨破 → TQQQ 换成 QQQ<br/>降杠杆防守</p>
+                      </div>
+                      <div className="bg-blue-50 rounded p-2">
+                        <p className="font-medium text-blue-600 text-xs">回落 1.06</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">QQQ 跌回 1.06 以下<br/>换回 TQQQ</p>
+                      </div>
+                    </div>
+                    <p className="text-slate-400 text-[11px] pt-1">
+                      1.01~1.06 持 TQQQ ｜ 1.06~1.14 持 QQQ ｜ 1.14 以上仍持 QQQ ｜ 1.01 以下空仓
+                    </p>
+                  </div>
+                ) : isMeanReversionMode ? (
                   <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1">
                     <p className="font-medium text-slate-700 mb-1">操作规则：</p>
                     <div className="grid grid-cols-5 gap-1.5">
@@ -938,14 +987,24 @@ export default function ETFRotationPage() {
             {/* ETF 列表 */}
             <div>
               <h2 className="text-sm font-medium text-slate-500 mb-3">
-                {isMeanReversionMode
+                {isMa200TrendMode
+                  ? '美股 QQQ / TQQQ'
+                  : isMeanReversionMode
                   ? `均值回归 (${meanReversionData?.data.etfs.length || 0})`
                   : isOversoldMode 
                   ? `ENE下轨标的 (${oversoldData?.data.etfs.length || 0})` 
                   : `趋势排名 (${rotationData?.data.etfs.length || 0})`}
               </h2>
               
-              {isMeanReversionMode ? (
+              {isMa200TrendMode ? (
+                ma200TrendData?.data ? (
+                  <Ma200TrendCard data={ma200TrendData.data} />
+                ) : (
+                  <Card className="p-8 text-center border-slate-200">
+                    <p className="text-slate-500">暂无数据</p>
+                  </Card>
+                )
+              ) : isMeanReversionMode ? (
                 (() => {
                   const sorted = [...(meanReversionData?.data.etfs || [])].sort((a, b) => {
                     const order: Record<string, number> = { strongBuy: 0, suggestBuy: 1, hold: 2, suggestSell: 3, strongSell: 4 };

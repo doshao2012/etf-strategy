@@ -167,6 +167,27 @@ def get_mean_reversion_strategy():
         return {"code": 500, "message": str(e)}
 
 
+@app.get("/api/strategy/ma200-trend")
+def get_ma200_trend_strategy():
+    """获取美股 QQQ/TQQQ 三轨 MA200 策略（实时价 + 本地历史，实时计算状态与建议）"""
+    import subprocess
+    import json
+
+    try:
+        script = os.path.join(os.path.dirname(__file__), "scripts", "calculate_ma200_trend.py")
+        result = subprocess.run(
+            ["python3", script],
+            capture_output=True, text=True, timeout=30
+        )
+
+        if result.returncode != 0:
+            return {"code": 500, "message": "计算失败", "error": result.stderr}
+
+        return json.loads(result.stdout)
+    except Exception as e:
+        return {"code": 500, "message": str(e)}
+
+
 # ============== 健康检查 ==============
 
 @app.get("/api/health")

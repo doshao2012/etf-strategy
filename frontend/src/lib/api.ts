@@ -121,6 +121,72 @@ export function getMeanReversionStrategy(): Promise<MeanReversionResponse> {
   return fetchAPI<MeanReversionResponse>('/api/strategy/mean-reversion');
 }
 
+// 美股 QQQ/TQQQ 三轨 MA200 策略
+export interface Ma200Line {
+  level: number;
+  price: number;
+  distancePct: number;
+}
+
+export interface Ma200StatePoint {
+  day: string;
+  state: number;
+  position: string;
+}
+
+export interface Ma200TrendResponse {
+  code: number;
+  message: string;
+  data: {
+    symbol: {
+      qqq: {
+        price: number;
+        changePct: number | null;
+        ma200: number | null;
+        ratio: number | null;
+      };
+      tqqq: {
+        price: number | null;
+        changePct: number | null;
+      };
+    };
+    state: {
+      current: number;
+      currentName: string;
+      previous: number;
+      previousName: string;
+      changed: boolean;
+    };
+    advice: {
+      action: string;
+      target: string;
+      detail: string;
+    };
+    lines: {
+      lower?: Ma200Line;
+      upperExit?: Ma200Line;
+      upperEntry?: Ma200Line;
+    };
+    params: {
+      lowerLine: number;
+      upperEntry: number;
+      upperExit: number;
+      maPeriod: number;
+    };
+    stateHistory: Ma200StatePoint[];
+    timestamp: string;
+    quoteTime: string;
+    isAfterHours: boolean;
+    dataSource: string;
+    historyUpdated: string;
+    realtimeOk: boolean;
+  };
+}
+
+export function getMa200TrendStrategy(): Promise<Ma200TrendResponse> {
+  return fetchAPI<Ma200TrendResponse>('/api/strategy/ma200-trend');
+}
+
 // ETF配置相关API
 export interface EtfConfig {
   id: number;
