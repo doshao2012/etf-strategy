@@ -18,11 +18,17 @@ export async function GET() {
       throw new Error(data.message || '策略计算失败');
     }
 
+    // 把后端实测的服务端耗时透传给浏览器
+    // （浏览器里 总耗时 - X-Server-Cost 就是网络 + Next 转发所占的部分）
+    const headers: Record<string, string> = {};
+    const serverCost = response.headers.get('X-Server-Cost');
+    if (serverCost) headers['X-Server-Cost'] = serverCost;
+
     return NextResponse.json({
       code: 200,
       message: 'success',
       data: data.data,
-    });
+    }, { headers });
   } catch (error: any) {
     console.error('MA200 趋势策略接口错误:', error);
     return NextResponse.json(

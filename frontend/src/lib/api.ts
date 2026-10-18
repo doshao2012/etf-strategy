@@ -61,6 +61,7 @@ export interface OversoldResponse {
 
 async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = API_BASE_URL ? `${API_BASE_URL}${endpoint}` : endpoint;
+  const t0 = Date.now();
   const res = await fetch(url, {
     ...options,
     headers: {
@@ -69,12 +70,23 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> 
     },
     next: { revalidate: 60 },
   });
-  
+  const tHead = Date.now();
+  const body = await res.json();
+  const t1 = Date.now();
+
+  // 浏览器控制台可见：一眼分清"前端请求慢"还是"后端算得慢"。
+  // X-Server-Cost 由后端在每个策略接口上回传（服务端计算耗时）。
+  const serverCost = res.headers.get('X-Server-Cost');
+  console.log(
+    `[API] ${endpoint} 总耗时 ${t1 - t0}ms (首字节 ${tHead - t0}ms, 读body ${t1 - tHead}ms)` +
+    (serverCost ? ` | 后端计算 ${Number(serverCost) * 1000}ms` : ' | 后端未返回耗时头')
+  );
+
   if (!res.ok) {
     throw new Error(`API Error: ${res.status} ${res.statusText}`);
   }
-  
-  return res.json();
+
+  return body as T;
 }
 
 export function getETFStrategy(): Promise<StrategyResponse> {

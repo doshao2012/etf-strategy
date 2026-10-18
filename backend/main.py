@@ -7,8 +7,11 @@ from pydantic import BaseModel
 from typing import Optional
 from etf_config_store import load_configs, get_config_by_id, update_config, create_config, delete_config
 import os
+import sys
 import threading
 import time
+
+_BOOT_TS = time.time()
 
 app = FastAPI(title="ETF 策略服务", version="1.0.0")
 
@@ -128,6 +131,12 @@ def delete_etf_config(id: int):
 # 详见 scripts/worker_pool.py。
 
 
+def _log(msg):
+    """统一日志出口：带时间戳与线程名，方便和多 worker 的日志对齐。"""
+    import time as _t
+    print(f"[{_t.strftime('%H:%M:%S')}][{threading.current_thread().name}] {msg}", flush=True)
+
+
 def _run_script(script_name, args=None, timeout=60):
     """执行策略脚本并解析 JSON 输出。
 
@@ -136,19 +145,28 @@ def _run_script(script_name, args=None, timeout=60):
     worker 不可用时回退到子进程，保证功能不缺失。
     """
     import json as _json
+    import time as _t
+    t0 = _t.time()
     try:
         from scripts.worker_pool import run_script
         out = run_script(script_name, args or [], timeout=timeout)
+        el = _t.time() - t0
         if out.get('ok'):
+            src = out.get('via', '?')
+            _log(f"[脚本] {script_name} {el:.3f}s via={src}")
             return _json.loads(out['stdout'])
+        _log(f"[脚本×] {script_name} {el:.3f}s via={out.get('via','?')} "
+             f"err={(out.get('stderr') or '')[:300]}")
         return {"code": 500, "message": "计算失败", "error": (out.get('stderr') or '')[:2000]}
-    except Exception:
+    except Exception as e:
+        _log(f"[池×] {script_name} 不可用，回退子进程: {e}")
         import subprocess
         script = os.path.join(os.path.dirname(__file__), "scripts", script_name)
         r = subprocess.run(
             ["python3", script] + [str(a) for a in (args or [])],
             capture_output=True, text=True, timeout=timeout
         )
+        _log(f"[脚本/子进程] {script_name} {_t.time()-t0:.3f}s rc={r.returncode}")
         if r.returncode != 0:
             return {"code": 500, "message": "计算失败", "error": r.stderr}
         return _json.loads(r.stdout)
@@ -194,7 +212,7 @@ def _warmup_loop(jobs, rounds=3):
 @app.get("/api/strategy/etf-rotation")
 def get_etf_rotation_strategy():
     """获取 ETF 轮动策略（实时计算，结果不缓存）"""
-    return _compute_etf_rotation()
+    return _trace("etf-rotation", _compute_etf_rotation)
 
 
 def _compute_etf_rotation():
@@ -222,13 +240,10 @@ def _compute_etf_rotation():
 @app.get("/api/strategy/oversold")
 def get_oversold_strategy():
     """获取超跌策略（实时计算，结果不缓存）"""
-    return _compute_oversold()
+    return _trace("oversold", _compute_oversold)
 
 
 def _compute_oversold():
-    import subprocess
-    import json
-
     try:
         return _run_script("calculate_oversold_strategy.py", [])
     except Exception as e:
@@ -238,13 +253,10 @@ def _compute_oversold():
 @app.get("/api/strategy/mean-reversion")
 def get_mean_reversion_strategy():
     """获取均值回归策略（实时计算，结果不缓存）"""
-    return _compute_mean_reversion()
+    return _trace("mean-reversion", _compute_mean_reversion)
 
 
 def _compute_mean_reversion():
-    import subprocess
-    import json
-
     try:
         return _run_script("calculate_mean_reversion.py", [])
     except Exception as e:
@@ -254,7 +266,7 @@ def _compute_mean_reversion():
 @app.get("/api/strategy/ma200-trend")
 def get_ma200_trend_strategy():
     """获取美股 QQQ/TQQQ 三轨 MA200 策略（实时计算，结果不缓存）"""
-    return _compute_ma200_trend()
+    return _trace("ma200-trend", lambda: _compute_ma200_trend())
 
 
 def _compute_ma200_trend():
@@ -264,6 +276,38 @@ def _compute_ma200_trend():
         return {"code": 500, "message": str(e)}
 
 
+def _trace(name, fn):
+    """记录单个策略接口的服务端耗时，并在响应头回传（X-Server-Cost）。
+
+    前端可在浏览器 Network 面板直接看到这个头：
+    总耗时 - X-Server-Cost = 网络 + Next 转发 + 渲染，一眼就能分清是哪一段慢。
+    """
+    import time as _t
+    from fastapi.responses import JSONResponse
+    rss0 = _rss_mb()
+    t0 = _t.time()
+    _log(f"[请求→] {name}")
+    result = fn()
+    el = _t.time() - t0
+    rss1 = _rss_mb()
+    ok = isinstance(result, dict) and result.get('code') == 200
+    _log(f"[请求←] {name} 服务端 {el:.3f}s ok={ok} rss={rss1:.0f}MB(Δ{rss1-rss0:+.0f})")
+    resp = JSONResponse(content=result)
+    resp.headers['X-Server-Cost'] = f'{el:.3f}'
+    return resp
+
+
+def _rss_mb():
+    """当前进程常驻内存（MB），用于观察容器是否贴着内存上限。"""
+    try:
+        with open('/proc/self/status') as f:
+            for line in f:
+                if line.startswith('VmRSS:'):
+                    return int(line.split()[1]) / 1024
+    except Exception:
+        return 0.0
+
+
 # ============== 健康检查 ==============
 
 @app.get("/api/health")
@@ -271,6 +315,70 @@ def health_check():
     """健康检查"""
     from datetime import datetime
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
+
+
+@app.get("/api/debug/perf")
+def debug_perf():
+    """线上体检：把 worker 池的实际状态摊开，用来判断"5 秒"卡在哪一层。
+
+    部署后直接 curl 这个接口即可，不需要 SSH 进容器。
+    """
+    import time as _t
+    out = {
+        'backend': {
+            'pid': os.getpid(),
+            'rssMB': round(_rss_mb(), 1),
+            'uptimeSec': round(_t.time() - _BOOT_TS, 1),
+            'python': sys.version.split()[0],
+            'cpuCount': os.cpu_count(),
+        },
+        'workerPool': {},
+        'probe': {},
+    }
+    try:
+        from scripts.worker_pool import get_pool
+        p = get_pool()
+        alive = [w for w in p.pool if w.alive()]
+        out['workerPool'] = {
+            'poolLen': len(p.pool),
+            'alive': len(alive),
+            'size': p.size,
+            'max': p.max_size,
+            'workers': [{'pid': w.proc.pid, 'alive': w.alive(),
+                         'busy': w.lock.locked()} for w in p.pool],
+        }
+    except Exception as e:
+        out['workerPool'] = {'error': repr(e)}
+
+    # 实测一次 MA200：走池子还是重建，耗时多少
+    t0 = _t.time()
+    try:
+        from scripts.worker_pool import run_script
+        r = run_script('calculate_ma200_trend.py', [], timeout=30)
+        out['probe'] = {
+            'script': 'calculate_ma200_trend.py',
+            'ok': r.get('ok'),
+            'via': r.get('via'),
+            'poolElapsed': round(_t.time() - t0, 3),
+            'bytes': len(r.get('stdout') or ''),
+        }
+    except Exception as e:
+        out['probe'] = {'error': repr(e), 'elapsed': round(_t.time() - t0, 3)}
+
+    # 数据源直连耗时（区分本地慢还是外网慢）
+    for label, url, hdr in [
+        ('sina实时', 'https://hq.sinajs.cn/list=gb_qqq,gb_tqqq',
+         {'Referer': 'https://finance.sina.com.cn', 'User-Agent': 'Mozilla/5.0'}),
+    ]:
+        t0 = _t.time()
+        try:
+            import requests
+            requests.get(url, headers=hdr, timeout=(3, 8))
+            out['probe'][label] = round(_t.time() - t0, 3)
+        except Exception as e:
+            out['probe'][label] = f'fail {e}'
+
+    return out
 
 
 @app.get("/api/data-health")
