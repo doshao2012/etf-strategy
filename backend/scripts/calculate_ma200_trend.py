@@ -191,6 +191,17 @@ def distance_to(ratio, line):
 
 
 def main():
+    # 先尝试增量补齐历史日线（当日已更新过则直接跳过，开销可忽略）
+    # 任何失败都不影响策略运行，继续用现有历史数据
+    update_info = {}
+    try:
+        from update_qqq_history import update as update_history
+        update_info = update_history()
+        if update_info.get('error'):
+            print(f"历史数据更新失败（继续使用现有数据）: {update_info['error']}", file=sys.stderr)
+    except Exception as e:
+        print(f"历史数据更新模块异常（继续使用现有数据）: {e}", file=sys.stderr)
+
     history, hist_updated = load_history()
     if len(history) < MA_PERIOD:
         print(json.dumps({
@@ -287,6 +298,11 @@ def main():
             'dataSource': '新浪财经实时价 + 本地历史日线',
             'historyUpdated': hist_updated,
             'realtimeOk': current_price is not None,
+            # 历史数据新鲜度：供前端判断是否需要提示"数据过期"
+            'historyStale': bool(update_info.get('stale')),
+            'historyAgeDays': update_info.get('staleDays'),
+            'historySyncOk': update_info.get('error') is None,
+            'historySyncError': update_info.get('error'),
         },
     }
 

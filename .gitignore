@@ -38,3 +38,10 @@ coverage
 # Preview files
 .preview
 .codegraph
+
+# Python 运行时缓存
+__pycache__/
+*.pyc
+
+# 历史数据同步的运行元信息（本地状态，不入库）
+qqq_history_meta.json

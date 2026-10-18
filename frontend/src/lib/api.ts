@@ -180,6 +180,14 @@ export interface Ma200TrendResponse {
     dataSource: string;
     historyUpdated: string;
     realtimeOk: boolean;
+    /** 历史日线是否已过期（距最新交易日超过 5 天） */
+    historyStale?: boolean;
+    /** 最新交易日距今天数 */
+    historyAgeDays?: number | null;
+    /** 最近一次自动同步历史日线是否成功 */
+    historySyncOk?: boolean;
+    /** 同步失败原因 */
+    historySyncError?: string | null;
   };
 }
 

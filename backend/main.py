@@ -7,6 +7,8 @@ from pydantic import BaseModel
 from typing import Optional
 from etf_config_store import load_configs, get_config_by_id, update_config, create_config, delete_config
 import os
+import threading
+import time
 
 app = FastAPI(title="ETF 策略服务", version="1.0.0")
 
@@ -18,6 +20,34 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _qqq_history_daemon():
+    """后台守护线程：定期补齐 QQQ/TQQQ 历史日线。
+
+    与轮动策略的"按天缓存"一致，每天只需成功一次；这里每 6 小时检查一次，
+    即使当天某次失败，后续也会自动重试，无需人工干预。
+    """
+    import sys
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'scripts'))
+    while True:
+        try:
+            from update_qqq_history import update as update_history
+            r = update_history()
+            if r.get('error'):
+                print(f"[历史同步] 失败: {r['error']}", flush=True)
+            elif r.get('updated'):
+                print(f"[历史同步] 新增 {r['added']} 个交易日，最新 {r['historyUpdated']}", flush=True)
+        except Exception as e:
+            print(f"[历史同步] 异常: {e}", flush=True)
+        time.sleep(6 * 3600)
+
+
+@app.on_event("startup")
+def _start_qqq_history_sync():
+    if os.environ.get('DISABLE_HISTORY_SYNC') == '1':
+        return
+    threading.Thread(target=_qqq_history_daemon, daemon=True).start()
 
 
 # ============== 数据模型 ==============
@@ -195,6 +225,19 @@ def health_check():
     """健康检查"""
     from datetime import datetime
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
+
+
+@app.get("/api/data-health")
+def data_health():
+    """数据新鲜度体检：QQQ 历史日线是否及时更新"""
+    try:
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'scripts'))
+        from update_qqq_history import update as update_history
+        r = update_history(audit_only=True)
+        return {"code": 200, "data": r}
+    except Exception as e:
+        return {"code": 500, "message": str(e)}
 
 
 if __name__ == "__main__":
