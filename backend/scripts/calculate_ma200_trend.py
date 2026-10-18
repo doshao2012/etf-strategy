@@ -35,12 +35,31 @@ MA_PERIOD = 200      # 均线周期
 # 历史数据文件
 HISTORY_FILE = os.path.join(os.path.dirname(__file__), '..', 'qqq_history.json')
 
-# 新浪实时行情（美股代码前缀 gb_）
+# 实时行情数据源（按顺序尝试，第一个成功即用）
+
+# 源 1：新浪（境内网络通常最快，但部分机房 IP 会被吊住 5 秒后断开）
 SINA_URL = 'https://hq.sinajs.cn/list=gb_qqq,gb_tqqq'
 SINA_HEADERS = {
     'Referer': 'https://finance.sina.com.cn',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
 }
+
+# 源 2：腾讯（美股用 usQQQ / usTQQQ，注意不带 .OQ 后缀）
+# 字段：[1]名称 [2]代码 [3]当前价 [30]报价时间 [32]涨跌幅%
+TENCENT_URL = 'https://qt.gtimg.cn/q=usQQQ,usTQQQ'
+TENCENT_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+}
+
+# 超时设置：连接 1.5s / 读取 2s。
+# 实测（线上日志）新浪会「先吊住 5 秒再断开」，原来的 (3, 5) 等于每次白白干等 5 秒；
+# 这里压短，不通就立刻换下一个源。
+CONNECT_TIMEOUT = 1.5
+READ_TIMEOUT = 2.0
+
+# 失败冷却：某个源刚失败过，这段时间内不再尝试，直接用下一个源
+SOURCE_COOLDOWN = 180
+_SOURCE_FAIL_TS = {}
 
 # 状态常量
 STATE_EMPTY = -1
@@ -66,30 +85,31 @@ def load_history():
         return [], ''
 
 
-def fetch_realtime():
-    """获取 QQQ / TQQQ 实时价格（新浪接口，GBK 编码）"""
-    result = {
+def _empty_result():
+    return {
         'qqq': None, 'tqqq': None,
         'qqq_change_pct': None, 'tqqq_change_pct': None,
         'quote_time': '',
         'is_after_hours': False,
     }
-    # 分段计时：线上排查"接口要 5 秒"时，必须知道是 DNS/连接慢、还是读取慢
-    t0 = time.time()
-    try:
-        # 连接与读取分开设超时：连不上时 3s 就放弃，避免切换 tab 时长时间白等
-        resp = requests.get(SINA_URL, headers=SINA_HEADERS, timeout=(3, 5))
-        t1 = time.time()
-        resp.encoding = 'gbk'
-        text = resp.text
-        t2 = time.time()
-        print(f"[MA200计时] 新浪请求 {t1-t0:.3f}s (连接+首字节) / 读取body {t2-t1:.3f}s "
-              f"/ {len(text)}B", file=sys.stderr, flush=True)
-    except Exception as e:
-        print(f"[MA200计时] 新浪请求失败 用时 {time.time()-t0:.3f}s: {e}", file=sys.stderr, flush=True)
-        print(f"获取实时行情失败: {e}", file=sys.stderr)
-        return result
 
+
+def _in_cooldown(name):
+    ts = _SOURCE_FAIL_TS.get(name)
+    return bool(ts) and (time.time() - ts) < SOURCE_COOLDOWN
+
+
+def _fetch_sina():
+    """新浪源。返回 (解析结果 dict, 失败原因 or None)"""
+    resp = requests.get(SINA_URL, headers=SINA_HEADERS,
+                        timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+    resp.encoding = 'gbk'
+    text = resp.text
+    result = _empty_result()
+
+    # 关键校验：被拒绝时新浪会返回极短的空响应（实测 9 字节），
+    # 这种"200 但没数据"会被当成成功，导致前端拿不到价格还不报错。
+    found = 0
     for symbol in ('qqq', 'tqqq'):
         match = re.search(r'var hq_str_gb_%s="([^"]*)"' % symbol, text)
         if not match:
@@ -108,12 +128,97 @@ def fetch_realtime():
             result.setdefault('regular_close', {})[symbol] = regular_close
             result.setdefault('after_chg_pct', {})[symbol] = round(after_chg_pct, 2)
             if not result['quote_time']:
-                result['quote_time'] = fields[3]
+                # 新浪给的是北京时间
+                result['quote_time'] = f"{fields[3]} (北京)"
             # 若盘后涨跌幅不为 0 且常规已收盘，视为盘后时段
             if 'PM' in close_time and after_chg_pct != 0:
                 result['is_after_hours'] = True
+            found += 1
         except (ValueError, IndexError) as e:
             print(f"解析 {symbol} 行情失败: {e}", file=sys.stderr)
+
+    if found == 0:
+        return None, f'响应无有效数据（{len(text)}B）'
+    return result, None
+
+
+def _fetch_tencent():
+    """腾讯源。美股用 usQQQ / usTQQQ（不带 .OQ 后缀）。
+
+    字段：[1]名称 [2]代码 [3]当前价 [30]报价时间(北京时间) [32]涨跌幅%
+    """
+    resp = requests.get(TENCENT_URL, headers=TENCENT_HEADERS,
+                        timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+    text = resp.content.decode('gbk', errors='ignore')
+    result = _empty_result()
+
+    found = 0
+    for key, symbol in (('usQQQ', 'qqq'), ('usTQQQ', 'tqqq')):
+        match = re.search(r'v_%s="([^"]*)"' % key, text)
+        if not match:
+            continue
+        fields = match.group(1).split('~')
+        if len(fields) < 33:
+            continue
+        try:
+            last = float(fields[3])
+            change_pct = float(fields[32])
+            result[symbol] = last
+            result['%s_change_pct' % symbol] = round(change_pct, 2)
+            if not result['quote_time']:
+                # 腾讯给的是美东收盘时间（如 2026-10-16 16:00:02），
+                # 新浪给的是北京时间。这里统一加标注，避免前端显示歧义。
+                result['quote_time'] = f"{fields[30]} (美东)"
+            found += 1
+        except (ValueError, IndexError) as e:
+            print(f"解析腾讯 {key} 失败: {e}", file=sys.stderr)
+
+    if found == 0:
+        return None, f'响应无有效数据（{len(text)}B）'
+    return result, None
+
+
+# 数据源优先级：新浪优先（境内通常最快），失败立即换腾讯
+SOURCES = (('新浪', _fetch_sina), ('腾讯', _fetch_tencent))
+
+
+def fetch_realtime():
+    """获取 QQQ / TQQQ 实时价格。
+
+    多源回退 + 短超时 + 失败冷却：
+      - 线上实测新浪会把请求吊住 5 秒再断开（read timeout），
+        原来 (3,5) 的超时等于每次白等 5 秒，页面自然卡 5 秒；
+      - 现在每个源最多等 1.5+2 秒，不通立刻换下一个；
+      - 失败过的源冷却 3 分钟，避免每次切换 tab 都先撞一次墙。
+    """
+    t_all = time.time()
+    for name, fn in SOURCES:
+        if _in_cooldown(name):
+            print(f"[MA200计时] {name} 冷却中，跳过", file=sys.stderr, flush=True)
+            continue
+        t0 = time.time()
+        try:
+            result, err = fn()
+            el = time.time() - t0
+            if err:
+                _SOURCE_FAIL_TS[name] = time.time()
+                print(f"[MA200计时] {name} 无效 {el:.3f}s: {err}（冷却 {SOURCE_COOLDOWN}s）",
+                      file=sys.stderr, flush=True)
+                continue
+            print(f"[MA200计时] {name} 成功 {el:.3f}s "
+                  f"QQQ={result.get('qqq')} TQQQ={result.get('tqqq')}",
+                  file=sys.stderr, flush=True)
+            result['source'] = name
+            return result
+        except Exception as e:
+            el = time.time() - t0
+            _SOURCE_FAIL_TS[name] = time.time()
+            print(f"[MA200计时] {name} 失败 {el:.3f}s: {e}（冷却 {SOURCE_COOLDOWN}s）",
+                  file=sys.stderr, flush=True)
+
+    print(f"[MA200计时] 所有数据源均不可用，总耗时 {time.time()-t_all:.3f}s",
+          file=sys.stderr, flush=True)
+    return _empty_result()
     return result
 
 
@@ -319,7 +424,7 @@ def main():
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'quoteTime': rt.get('quote_time', ''),
             'isAfterHours': rt.get('is_after_hours', False),
-            'dataSource': '新浪财经实时价 + 本地历史日线',
+            'dataSource': f"{rt.get('source', '无')}实时价 + 本地历史日线",
             'historyUpdated': hist_updated,
             'realtimeOk': current_price is not None,
             # 历史数据新鲜度：供前端判断是否需要提示"数据过期"
