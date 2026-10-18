@@ -174,6 +174,11 @@ def load_config():
     config_path = os.path.join(script_dir, '..', 'etf_config.json')
     with open(config_path, 'r') as f:
         config = json.load(f)
+
+    # 批量预取实时行情：一次请求拿回所有标的，
+    # 避免下面循环里逐只串行请求（10 只就是 10 次网络往返）
+    prefetch_realtime([(it['market'], it['code']) for it in config])
+
     for item in config:
         code = item['code']
         market = item['market']
