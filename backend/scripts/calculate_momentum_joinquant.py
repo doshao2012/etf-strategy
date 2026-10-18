@@ -17,8 +17,54 @@ CONFIG_FILE = os.path.join(os.path.dirname(__file__), '..', 'etf_config.json')
 # 历史数据缓存文件
 HISTORY_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'history_cache.json')
 
+_REALTIME_PREFETCH = {}
+
+
+def prefetch_realtime(codes):
+    """批量预取实时行情，一次请求拿回所有标的。
+
+    原来每只 ETF 单独请求一次，10 只就是 10 次串行往返（本地 1.3s，线上更久）。
+    腾讯支持 q=sh512890,sz159915,... 批量查询，一次即可。
+    """
+    global _REALTIME_PREFETCH
+    if not codes:
+        return
+    try:
+        syms = ','.join(f"{m}{c}" for m, c in codes)
+        response = requests.get(f"https://qt.gtimg.cn/q={syms}", timeout=6)
+        content = response.text
+        cache = {}
+        for sym, data_str in re.findall(r'v_(\w+)="([^"]*)"', content):
+            if not data_str:
+                continue
+            try:
+                fields = data_str.split('~')
+                current = float(fields[3]) if fields[3] else 0
+                change_pct = float(fields[32]) if len(fields) > 32 and fields[32] else 0
+                today_high = float(fields[33]) if len(fields) > 33 and fields[33] else current
+                today_low = float(fields[34]) if len(fields) > 34 and fields[34] else current
+                trade_time = fields[30] if len(fields) > 30 and fields[30] else ''
+                trade_date = (f'{trade_time[:4]}-{trade_time[4:6]}-{trade_time[6:8]}'
+                              if len(trade_time) >= 8 else '')
+                cache[sym] = (current, change_pct, today_high, today_low, trade_date)
+            except (ValueError, IndexError):
+                continue
+        _REALTIME_PREFETCH = cache
+        print(f"批量预取实时行情: {len(cache)}/{len(codes)} 只", file=sys.stderr)
+    except Exception as e:
+        print(f"批量预取实时行情失败: {e}", file=sys.stderr)
+        _REALTIME_PREFETCH = {}
+
+
 def get_realtime_price(market, code):
-    """获取实时价格及今日最高/最低价（不缓存，每次都获取最新）"""
+    """获取实时价格及今日最高/最低价。
+
+    优先用 prefetch_realtime 的批量结果，避免逐只串行请求；
+    未预取到时才回退到单只请求。
+    """
+    key = f"{market}{code}"
+    if key in _REALTIME_PREFETCH:
+        return _REALTIME_PREFETCH[key]
     try:
         url = f"https://qt.gtimg.cn/q={market}{code}"
         response = requests.get(url, timeout=5)

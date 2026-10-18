@@ -121,9 +121,37 @@ def delete_etf_config(id: int):
 
 # ============== ETF 策略接口 ==============
 
+# 策略结果短时缓存：避免"切 tab 就重跑一遍子进程 + 联网"。
+# 策略信号本身按日更新，60 秒内的重复请求复用结果完全安全，
+# 同时把一次切换的开销从"进程启动+多次网络往返"降到一次内存读取。
+_STRATEGY_CACHE = {}
+STRATEGY_CACHE_TTL = 60
+
+
+def _cached(key, producer):
+    import time as _t
+    hit = _STRATEGY_CACHE.get(key)
+    now = _t.time()
+    if hit and (now - hit['ts']) < STRATEGY_CACHE_TTL:
+        data = dict(hit['data'])
+        # 标记数据来自缓存，便于排查
+        if isinstance(data, dict):
+            data['_cached'] = True
+            data['_cacheAgeSec'] = round(now - hit['ts'], 1)
+        return data
+    data = producer()
+    if isinstance(data, dict) and data.get('code') == 200:
+        _STRATEGY_CACHE[key] = {'ts': now, 'data': data}
+    return data
+
+
 @app.get("/api/strategy/etf-rotation")
 def get_etf_rotation_strategy():
-    """获取 ETF 轮动策略"""
+    """获取 ETF 轮动策略（60 秒内复用缓存，避免重复跑子进程）"""
+    return _cached('etf-rotation', _compute_etf_rotation)
+
+
+def _compute_etf_rotation():
     import subprocess
     import json
     
@@ -199,7 +227,11 @@ def get_mean_reversion_strategy():
 
 @app.get("/api/strategy/ma200-trend")
 def get_ma200_trend_strategy():
-    """获取美股 QQQ/TQQQ 三轨 MA200 策略（实时价 + 本地历史，实时计算状态与建议）"""
+    """获取美股 QQQ/TQQQ 三轨 MA200 策略（60 秒内复用缓存）"""
+    return _cached('ma200-trend', _compute_ma200_trend)
+
+
+def _compute_ma200_trend():
     import subprocess
     import json
 
