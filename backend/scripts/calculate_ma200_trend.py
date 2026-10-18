@@ -74,7 +74,8 @@ def fetch_realtime():
         'is_after_hours': False,
     }
     try:
-        resp = requests.get(SINA_URL, headers=SINA_HEADERS, timeout=8)
+        # 连接与读取分开设超时：连不上时 3s 就放弃，避免切换 tab 时长时间白等
+        resp = requests.get(SINA_URL, headers=SINA_HEADERS, timeout=(3, 5))
         resp.encoding = 'gbk'
         text = resp.text
     except Exception as e:
@@ -191,16 +192,24 @@ def distance_to(ratio, line):
 
 
 def main():
-    # 先尝试增量补齐历史日线（当日已更新过则直接跳过，开销可忽略）
-    # 任何失败都不影响策略运行，继续用现有历史数据
+    # 历史日线同步：默认只读缓存状态，不在请求路径上联网拉数据。
+    # 原因 —— 前端每次切 tab 都会调这个脚本，如果在这里联网，
+    # 一旦数据源不通就要等满超时（腾讯 5s×2 重试 + 新浪 8s），页面会卡十几秒。
+    # 真正的更新由后端后台线程（每 6 小时一次）和 update_qqq_history.py 负责。
+    # 需要立即同步时传 --sync。
     update_info = {}
     try:
         from update_qqq_history import update as update_history
-        update_info = update_history()
+        if '--sync' in sys.argv:
+            update_info = update_history(force=True)
+        else:
+            # 只读取新鲜度，不发网络请求
+            from update_qqq_history import audit_only_status
+            update_info = audit_only_status()
         if update_info.get('error'):
-            print(f"历史数据更新失败（继续使用现有数据）: {update_info['error']}", file=sys.stderr)
+            print(f"历史数据同步提示: {update_info['error']}", file=sys.stderr)
     except Exception as e:
-        print(f"历史数据更新模块异常（继续使用现有数据）: {e}", file=sys.stderr)
+        print(f"历史数据状态读取异常（继续使用现有数据）: {e}", file=sys.stderr)
 
     history, hist_updated = load_history()
     if len(history) < MA_PERIOD:

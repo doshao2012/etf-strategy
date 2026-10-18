@@ -38,6 +38,12 @@ FETCH_COUNT = 600
 MIN_KEEP = 400
 # 距最近交易日超过该天数则告警（美股周末 + 假期，5 个自然日足够）
 STALE_DAYS = 5
+# 请求超时（秒）。历史同步是"锦上添花"，不能拖慢前端请求，所以给得比较紧
+FETCH_TIMEOUT = 5
+# 失败重试次数。重试会让最坏耗时成倍放大，这里只重试 1 次
+FETCH_RETRIES = 1
+# 失败后的冷却期（秒）：冷却期内不再尝试，避免每次切 tab 都重跑一遍超时
+FAIL_COOLDOWN = 3600
 
 
 def _load_json(path, default):
@@ -56,14 +62,14 @@ def _save_json(path, payload):
     os.replace(tmp, path)
 
 
-def fetch_kline(symbol, count=FETCH_COUNT, retries=2):
+def fetch_kline(symbol, count=FETCH_COUNT, retries=FETCH_RETRIES):
     """拉取腾讯前复权日线，返回 [(day, close), ...] 升序；失败返回 []"""
     for attempt in range(retries + 1):
         try:
             r = requests.get(
                 TENCENT_KLINE,
                 params={'param': f'{symbol},day,,,{count},qfq'},
-                timeout=15,
+                timeout=FETCH_TIMEOUT,
                 headers={'User-Agent': 'Mozilla/5.0'},
             )
             if r.status_code != 200:
@@ -118,6 +124,15 @@ def update(force=False, audit_only=False):
         return {'updated': False, 'added': 0, 'historyUpdated': last_day,
                 'stale': _is_stale(last_day), 'staleDays': _age_days(last_day),
                 'error': None, 'cached': True}
+
+    # 最近失败过且在冷却期内 → 直接返回，不再打接口
+    # （否则数据源不通时，每次切换 tab 都要等满超时，页面会非常卡）
+    if not force and meta.get('lastResult') == 'fail' and _in_cooldown(meta):
+        last_day = hist[-1]['day']
+        return {'updated': False, 'added': 0, 'historyUpdated': last_day,
+                'stale': _is_stale(last_day), 'staleDays': _age_days(last_day),
+                'error': meta.get('error') or '数据源暂不可用（冷却中）',
+                'cooldown': True}
 
     if audit_only:
         last_day = hist[-1]['day']
@@ -176,9 +191,43 @@ def update(force=False, audit_only=False):
         # 失败也记录，避免同一天内反复重试打爆接口；下次请求会因 lastResult!=ok 再试
         _save_json(UPDATE_META_FILE, {
             'lastRunDate': today, 'lastResult': 'fail',
+            'lastFailTs': time.time(),
             'lastRunAt': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'error': str(e)[:300]})
         return result
+
+
+def audit_only_status():
+    """纯本地读取历史数据新鲜度，**不发起任何网络请求**。
+
+    供策略脚本在请求路径上调用，保证前端响应速度不受数据源状况影响。
+    """
+    payload = _load_json(HISTORY_FILE, {})
+    hist = payload.get('data', [])
+    if not hist:
+        return {'updated': False, 'added': 0, 'historyUpdated': '',
+                'stale': True, 'staleDays': None,
+                'error': '历史文件为空或缺失', 'localOnly': True}
+
+    last_day = hist[-1]['day']
+    meta = _load_json(UPDATE_META_FILE, {})
+    err = None
+    if meta.get('lastResult') == 'fail' and _in_cooldown(meta):
+        err = meta.get('error') or '数据源暂不可用'
+    return {'updated': False, 'added': 0, 'historyUpdated': last_day,
+            'stale': _is_stale(last_day), 'staleDays': _age_days(last_day),
+            'error': err, 'localOnly': True}
+
+
+def _in_cooldown(meta):
+    """失败后是否仍在冷却期内"""
+    ts = meta.get('lastFailTs')
+    if not ts:
+        return False
+    try:
+        return (time.time() - float(ts)) < FAIL_COOLDOWN
+    except (TypeError, ValueError):
+        return False
 
 
 def _age_days(day):
