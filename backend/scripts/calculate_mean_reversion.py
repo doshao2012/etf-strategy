@@ -11,7 +11,9 @@ from datetime import datetime
 
 # 从动量策略脚本导入数据获取函数
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from calculate_momentum_joinquant import get_historical_prices, get_realtime_price, load_history_cache, save_history_cache
+from calculate_momentum_joinquant import (get_historical_prices, get_realtime_price,
+                                          load_history_cache, save_history_cache,
+                                          prefetch_realtime)
 
 # 策略标的：code, market, name
 TARGET_ETFS = [
@@ -68,6 +70,12 @@ def generate_signal(ratio_ma90, ratio_ma250):
 
 def main():
     results = []
+
+    # 先一次性批量拉回全部标的的实时价（腾讯支持 q=a,b,c 批量查询）。
+    # 原来在循环里逐只调用 get_realtime_price，5 只就是 5 次串行往返，
+    # 线上每次多花 0.4~0.5 秒；批量后只付一次网络往返。
+    prefetch_realtime([(etf['market'], etf['code']) for etf in TARGET_ETFS])
+
     for etf in TARGET_ETFS:
         code = etf['code']
         market = etf['market']
