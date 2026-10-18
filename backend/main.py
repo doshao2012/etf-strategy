@@ -48,6 +48,37 @@ def _start_qqq_history_sync():
     if os.environ.get('DISABLE_HISTORY_SYNC') == '1':
         return
     threading.Thread(target=_qqq_history_daemon, daemon=True).start()
+    threading.Thread(target=_warmup_strategies, daemon=True).start()
+
+
+def _warmup_strategies():
+    """启动后预热各策略缓存，然后转入后台定期刷新。
+
+    每个策略都是一次"新起 Python 进程 + 导入 pandas/numpy + 联网"，
+    冷启动约 1.5~2 秒。启动时就跑一遍，用户首次打开页面便能命中缓存；
+    之后由 _refresh_cache_forever 持续保活，避免缓存过期后撞上冷启动。
+    """
+    import time as _t
+    _t.sleep(2)   # 让 uvicorn 先把服务挂起来
+    jobs = [
+        ('etf-rotation', _compute_etf_rotation),
+        ('ma200-trend', _compute_ma200_trend),
+        ('mean-reversion', _compute_mean_reversion),
+        ('oversold', _compute_oversold),
+    ]
+    for name, fn in jobs:
+        try:
+            t0 = _t.time()
+            data = fn()
+            if isinstance(data, dict) and data.get('code') == 200:
+                _STRATEGY_CACHE[name] = {'ts': _t.time(), 'data': data}
+                print(f"[预热] {name} 完成 {_t.time()-t0:.2f}s", flush=True)
+            else:
+                print(f"[预热] {name} 未成功: {str(data)[:120]}", flush=True)
+        except Exception as e:
+            print(f"[预热] {name} 异常: {e}", flush=True)
+    print("[预热] 全部完成，转入后台定期刷新", flush=True)
+    _refresh_cache_forever(jobs)
 
 
 # ============== 数据模型 ==============
@@ -121,11 +152,12 @@ def delete_etf_config(id: int):
 
 # ============== ETF 策略接口 ==============
 
-# 策略结果短时缓存：避免"切 tab 就重跑一遍子进程 + 联网"。
-# 策略信号本身按日更新，60 秒内的重复请求复用结果完全安全，
-# 同时把一次切换的开销从"进程启动+多次网络往返"降到一次内存读取。
+# 策略结果缓存：避免"切 tab 就重跑一遍子进程 + 联网"。
+# 策略信号按日更新，缓存有效期给得比较宽；后台线程每 REFRESH_INTERVAL 秒
+# 主动刷新一次，用户任何时候打开都能命中缓存，不会撞上冷启动。
 _STRATEGY_CACHE = {}
-STRATEGY_CACHE_TTL = 60
+STRATEGY_CACHE_TTL = 600        # 缓存视为"可用"的最长时间
+REFRESH_INTERVAL = 300          # 后台刷新间隔（秒）
 
 
 def _cached(key, producer):
@@ -143,6 +175,27 @@ def _cached(key, producer):
     if isinstance(data, dict) and data.get('code') == 200:
         _STRATEGY_CACHE[key] = {'ts': now, 'data': data}
     return data
+
+
+def _refresh_cache_forever(jobs):
+    """后台定期刷新策略缓存，保证接口永远命中缓存。
+
+    每个策略跑一次要新起进程并导入 pandas/numpy（约 1.5~2 秒）。
+    如果等缓存过期后由用户请求触发，用户就会撞上这段冷启动；
+    改为后台主动刷新，用户侧始终是内存读取。
+    """
+    import time as _t
+    while True:
+        _t.sleep(REFRESH_INTERVAL)
+        for name, fn in jobs:
+            try:
+                t0 = _t.time()
+                data = fn()
+                if isinstance(data, dict) and data.get('code') == 200:
+                    _STRATEGY_CACHE[name] = {'ts': _t.time(), 'data': data}
+                    print(f"[刷新] {name} {_t.time()-t0:.2f}s", flush=True)
+            except Exception as e:
+                print(f"[刷新] {name} 异常: {e}", flush=True)
 
 
 @app.get("/api/strategy/etf-rotation")
@@ -185,10 +238,14 @@ def _compute_etf_rotation():
 
 @app.get("/api/strategy/oversold")
 def get_oversold_strategy():
-    """获取超跌策略"""
+    """获取超跌策略（60 秒内复用缓存）"""
+    return _cached('oversold', _compute_oversold)
+
+
+def _compute_oversold():
     import subprocess
     import json
-    
+
     try:
         script = os.path.join(os.path.dirname(__file__), "scripts", "calculate_oversold_strategy.py")
         result = subprocess.run(
@@ -206,10 +263,14 @@ def get_oversold_strategy():
 
 @app.get("/api/strategy/mean-reversion")
 def get_mean_reversion_strategy():
-    """获取均值回归策略"""
+    """获取均值回归策略（60 秒内复用缓存）"""
+    return _cached('mean-reversion', _compute_mean_reversion)
+
+
+def _compute_mean_reversion():
     import subprocess
     import json
-    
+
     try:
         script = os.path.join(os.path.dirname(__file__), "scripts", "calculate_mean_reversion.py")
         result = subprocess.run(
