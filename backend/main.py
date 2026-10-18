@@ -164,21 +164,29 @@ def _start_warmup():
     ])
 
 
-def _warmup_loop(jobs):
-    """后台预热/保活：让 worker 解释器保持热态。
+def _warmup_loop(jobs, rounds=3):
+    """后台预热/保活：让**每一个** worker 都先跑过一遍，全部进入热态。
 
     只预热进程，**不缓存结果** —— 用户每次请求仍会真实计算并读取最新实时价。
+
+    为什么要跑 rounds 轮：池里的 worker 是多个独立进程，只跑一遍只有其中一个
+    变成热的；其余几个仍要在用户请求时才导入 pandas/numpy（实测 0.6~0.8s）。
+    轮数取 3（略大于常驻数量），保证启动后每个 worker 都被摸过一遍。
     """
     import time as _t
     _t.sleep(2)
+    first = True
     while True:
-        for name, fn in jobs:
-            try:
-                t0 = _t.time()
-                fn()
-                print(f"[预热] {name} {_t.time()-t0:.2f}s", flush=True)
-            except Exception as e:
-                print(f"[预热] {name} 异常: {e}", flush=True)
+        n = rounds if first else 1
+        for _ in range(n):
+            for name, fn in jobs:
+                try:
+                    t0 = _t.time()
+                    fn()
+                    print(f"[预热] {name} {_t.time()-t0:.2f}s", flush=True)
+                except Exception as e:
+                    print(f"[预热] {name} 异常: {e}", flush=True)
+        first = False
         _t.sleep(300)
 
 
@@ -190,21 +198,19 @@ def get_etf_rotation_strategy():
 
 
 def _compute_etf_rotation():
-    import subprocess
-    import json
-    
     try:
-        # 前置：刷新市场数据（失败不阻断，主计算会自行拉取）
-        _run_script("fetch_market_data_from_db.py", timeout=30)
-
-        # 计算动量得分（每次都真实执行，实时价现拉）
+        # 动量计算脚本自己会读 history_cache.json（按天缓存），
+        # 实时价也由它用腾讯批量接口现拉，不再需要额外的预取脚本。
+        # 原来前置的 fetch_market_data_from_db.py 硬编码了旧项目路径
+        # （/app/server/...），产出的 etf-real-data.config.ts 无人引用，
+        # 却让每次请求多跑一个进程，已移除。
         python_result = _run_script("calculate_momentum_joinquant.py", ["25", "0", "0.97"])
         if python_result.get("code") != 200:
             return python_result
-        
+
         if not python_result.get("data", {}).get("etfs"):
             return {"code": 500, "message": "未能获取ETF策略数据"}
-        
+
         return {
             "code": 200,
             "data": python_result["data"]

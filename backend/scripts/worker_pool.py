@@ -14,6 +14,24 @@
 
 不用管道传结果，是因为脚本 stdout 可能很大（轮动脚本约 40KB），
 配合 stderr 输出容易造成管道阻塞；临时文件方式没有这个风险。
+
+三个关键设计（都为了"线上不会突然变慢"）：
+
+1. 只预热 requests，不预热 pandas/numpy
+   MA200 链路只用到 requests，却因为统一预热白付 0.39 秒启动、多吃 80MB 内存。
+   实测：预热 requests 约 0.11s / 29MB；再加 numpy+pandas 变成 0.50s / 109MB。
+   需要 pandas 的脚本（轮动、均值回归）首次执行时自行导入，之后该 worker 就是热的，
+   由后台预热任务把这条路走一遍，用户请求不会撞上。
+
+2. 按需扩容，不按固定 4 个
+   策略接口的超时是 30 秒，若 4 个 worker 全被占住，第 5 个请求会去起临时 worker
+   （0.44 秒启动，低配容器上更久）。这里改成：没有空闲就现开一个并留在池里，
+   请求直接受益；空闲过多（超过 max_size）时回收多余的，控制内存。
+
+3. 被杀不连坐，巡检只补不重建
+   worker 被外部杀掉（OOM、容器回收）时，原来会退化成"每次请求都新建一个再杀掉"，
+   每次都要付完整启动成本。现在改为：把死的从池里摘掉、立即补一个新的，
+   本次请求仍用存活的 worker 或新补的 worker，池子稳态迅速恢复。
 """
 import json
 import os
@@ -24,12 +42,16 @@ import threading
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# 预热模块：只放几乎所有脚本都要、且加载快的
+BOOT_MODULES = ("json", "re", "os", "sys", "math", "datetime", "requests")
+
 WORKER_BOOT = r'''
 import sys, os, json, runpy, traceback
 
-# 预热：把策略脚本常用的重依赖先导入，之后重复执行脚本不再付这份代价
-for _m in ("json", "re", "os", "sys", "math", "datetime",
-           "requests", "numpy", "pandas"):
+# 预热：只导入轻量且通用的依赖。
+# pandas/numpy 很重（+0.39s / +80MB），这里不预热，
+# 由真正需要它们的脚本在首次执行时自行导入。
+for _m in %(mods)s:
     try:
         __import__(_m)
     except Exception:
@@ -65,11 +87,11 @@ for line in sys.stdin:
         req = json.loads(line)
         req_id = req.get("id", "")
         ok = _run(req["path"], req.get("args", []), req["out"])
-        print("__DONE__ %s %s" % (req_id, "1" if ok else "0"), flush=True)
+        print("__DONE__ %%s %%s" %% (req_id, "1" if ok else "0"), flush=True)
     except Exception:
         traceback.print_exc(file=sys.stderr)
-        print("__DONE__ %s 0" % req_id, flush=True)
-'''
+        print("__DONE__ %%s 0" %% req_id, flush=True)
+''' % {'mods': repr(BOOT_MODULES)}
 
 
 class Worker:
@@ -92,6 +114,12 @@ class Worker:
 
     def alive(self):
         return self.proc is not None and self.proc.poll() is None
+
+    def kill(self):
+        try:
+            self.proc.kill()
+        except Exception:
+            pass
 
     def run(self, path, args, timeout):
         if not self.alive():
@@ -123,11 +151,12 @@ class Worker:
 
 
 class WorkerPool:
-    def __init__(self, size=4):
-        self.size = size
+    def __init__(self, size=2, max_size=6):
+        self.size = max(1, size)          # 常驻数量（巡检维持的下限）
+        self.max_size = max(self.size, max_size)
         self.pool = []
         self.pool_lock = threading.Lock()
-        for _ in range(size):
+        for _ in range(self.size):
             try:
                 self.pool.append(Worker())
             except Exception:
@@ -135,37 +164,89 @@ class WorkerPool:
         # 后台巡检：worker 意外退出时自动补齐，避免下次请求撞上冷启动
         threading.Thread(target=self._heal_loop, daemon=True).start()
 
+    def _alive(self):
+        return [w for w in self.pool if w.alive()]
+
     def _heal_loop(self):
+        """巡检：补齐到 size，多于 max_size 的回收掉。
+
+        注意这里必须先把死掉的 worker 对象彻底移出列表再补新的，
+        否则旧对象（连同其管道）会一直占着位置，导致"补了等于没补"。
+        """
         import time as _t
         while True:
-            _t.sleep(5)
+            _t.sleep(3)
             try:
-                alive = [w for w in self.pool if w.alive()]
-                missing = self.size - len(alive)
-                if missing <= 0:
-                    continue
-                # 先移除已死的，再补足
                 with self.pool_lock:
                     self.pool = [w for w in self.pool if w.alive()]
-                for _ in range(missing):
-                    try:
-                        w = Worker()
-                        with self.pool_lock:
-                            self.pool.append(w)
-                    except Exception:
-                        break
+                    alive = len(self.pool)
+                    need = self.size - alive
+                    extra = alive - self.max_size
+                    if extra > 0:
+                        # 回收多余的（挑没被占用的）
+                        for w in list(self.pool):
+                            if extra <= 0:
+                                break
+                            if w.lock.acquire(blocking=False):
+                                try:
+                                    w.kill()
+                                    self.pool.remove(w)
+                                    extra -= 1
+                                finally:
+                                    w.lock.release()
+                    for _ in range(max(0, need)):
+                        try:
+                            self.pool.append(Worker())
+                        except Exception:
+                            break
             except Exception:
                 pass
 
-    def run(self, path, args, timeout=60):
-        w = None
+    def _acquire(self, fresh=False):
+        """取一个空闲 worker。
+
+        fresh=True 时忽略池里现有的（用于"池里全是死进程"的补救）。
+        拿不到就现开一个并留在池里，让下一次请求直接受益。
+        """
         with self.pool_lock:
-            for cand in self.pool:
-                if cand.alive() and cand.lock.acquire(blocking=False):
-                    w = cand
-                    break
+            if not fresh:
+                for cand in self.pool:
+                    # 必须先判活：进程可能刚被 OOM / kill 掉，
+                    # 此时锁还是空闲的，直接取走会在 run 里立刻抛"进程已退出"。
+                    if cand.alive() and cand.lock.acquire(blocking=False):
+                        return cand
+            if fresh or len(self.pool) < self.max_size:
+                try:
+                    w = Worker()
+                    if w.lock.acquire(blocking=False):
+                        self.pool.append(w)
+                        return w
+                    w.kill()
+                except Exception:
+                    pass
+        return None
+
+    def _discard(self, w):
+        """把失效 worker 摘掉，并立刻补一个新的维持常驻数量。"""
+        with self.pool_lock:
+            if w in self.pool:
+                self.pool.remove(w)
+        w.kill()
+        def _refill():
+            try:
+                with self.pool_lock:
+                    if len(self._alive()) >= self.size:
+                        return
+                    self.pool.append(Worker())
+            except Exception:
+                pass
+        threading.Thread(target=_refill, daemon=True).start()
+
+    def run(self, path, args, timeout=60):
+        w = self._acquire()
+
+        # 没拿到空闲 worker（已达上限且全忙）：临时开一个，用完即弃
         if w is None:
-            # 全忙或全挂：起一个临时 worker 保证可用性
             tmp = Worker()
             try:
                 ok, body = tmp.run(path, args, timeout)
@@ -173,40 +254,52 @@ class WorkerPool:
             except Exception as e:
                 return {'ok': False, 'stdout': '', 'stderr': str(e)}
             finally:
+                tmp.kill()
+
+        # 锁的归属：正常路径由这里释放；worker 失效时在 _exec 里就地交接给新 worker
+        handoff = False
+        try:
+            handoff, out = self._exec(w, path, args, timeout)
+            return out
+        finally:
+            if not handoff:
                 try:
-                    tmp.proc.kill()
+                    w.lock.release()
                 except Exception:
                     pass
+
+    def _exec(self, w, path, args, timeout):
+        """执行一次，返回 (是否已把锁交接出去, 结果字典)。"""
         try:
             ok, body = w.run(path, args, timeout)
-            return {'ok': ok, 'stdout': body, 'stderr': ''}
+            return False, {'ok': ok, 'stdout': body, 'stderr': ''}
         except Exception as e:
-            # 该 worker 已死：从池中摘掉（巡检线程会补新的），
-            # 本次请求改用临时 worker，不让用户承担重建成本
+            # worker 已死（被 OOM / 外部杀掉）：摘掉并后台补位。
+            # 本次请求换一个存活的 worker 重试，不让用户承担重建成本。
+            self._discard(w)
             try:
-                w.proc.kill()
+                w.lock.release()      # 释放死 worker 的锁
             except Exception:
                 pass
-            with self.pool_lock:
-                if w in self.pool:
-                    self.pool.remove(w)
-            try:
-                tmp = Worker()
+
+            last_err = e
+            # 池里可能同时躺着一批死进程（例如容器刚被 OOM 扫过），
+            # 所以最多重试两次：先取存活的，再不行就强制新建。
+            for attempt in ('pool', 'fresh'):
+                w2 = self._acquire(fresh=(attempt == 'fresh'))
+                if w2 is None:
+                    continue
                 try:
-                    ok, body = tmp.run(path, args, timeout)
-                    return {'ok': ok, 'stdout': body, 'stderr': ''}
-                finally:
+                    ok, body = w2.run(path, args, timeout)
+                    return True, {'ok': ok, 'stdout': body, 'stderr': ''}
+                except Exception as e2:
+                    last_err = e2
+                    self._discard(w2)
                     try:
-                        tmp.proc.kill()
+                        w2.lock.release()
                     except Exception:
                         pass
-            except Exception as e2:
-                return {'ok': False, 'stdout': '', 'stderr': f'{e} / {e2}'}
-        finally:
-            try:
-                w.lock.release()
-            except Exception:
-                pass
+            return False, {'ok': False, 'stdout': '', 'stderr': str(last_err)}
 
 
 _POOL = None
@@ -218,21 +311,13 @@ def get_pool():
     if _POOL is None:
         with _POOL_LOCK:
             if _POOL is None:
-                _POOL = WorkerPool(size=int(os.environ.get('WORKER_POOL_SIZE', '4')))
+                _POOL = WorkerPool(
+                    size=int(os.environ.get('WORKER_POOL_SIZE', '2')),
+                    max_size=int(os.environ.get('WORKER_POOL_MAX', '6')),
+                )
     return _POOL
 
 
 def run_script(script_name, args=None, timeout=60):
     path = os.path.join(SCRIPTS_DIR, script_name)
     return get_pool().run(path, [str(a) for a in (args or [])], timeout)
-
-
-if __name__ == '__main__':
-    import time
-    for name, argv in [('calculate_ma200_trend.py', []),
-                       ('calculate_momentum_joinquant.py', ['25', '0', '0.97'])]:
-        for i in range(3):
-            t = time.time()
-            r = run_script(name, argv)
-            print(f"{name} 第{i+1}次: {time.time()-t:.3f}s  ok={r['ok']} "
-                  f"输出{len(r['stdout'])}字节", flush=True)
