@@ -156,7 +156,7 @@ def _run_script(script_name, args=None, timeout=60):
             _log(f"[脚本] {script_name} {el:.3f}s via={src}")
             return _json.loads(out['stdout'])
         _log(f"[脚本×] {script_name} {el:.3f}s via={out.get('via','?')} "
-             f"err={(out.get('stderr') or '')[:300]}")
+             f"err={(out.get('stderr') or '')[:600]}")
         return {"code": 500, "message": "计算失败", "error": (out.get('stderr') or '')[:2000]}
     except Exception as e:
         _log(f"[池×] {script_name} 不可用，回退子进程: {e}")

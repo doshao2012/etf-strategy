@@ -118,11 +118,14 @@ class Worker:
         env['SCRIPTS_DIR'] = SCRIPTS_DIR
         env['PYTHONUNBUFFERED'] = '1'
         t0 = time.time()
-        # stderr 直接丢弃到 DEVNULL，避免被大量日志堵死
+        # stderr 用管道接过来，由独立线程加前缀后转发到主进程日志。
+        # 早先这里是 DEVNULL（怕日志量大堵死管道），代价是脚本里的耗时日志
+        # 全部看不到——线上排查就变成了瞎猜。转发线程只读不写，不会拖慢 worker。
         self.proc = subprocess.Popen(
             [sys.executable, '-u', '-c', WORKER_BOOT],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, env=env,
+            stderr=subprocess.PIPE, text=True, env=env,
+            bufsize=1,
         )
         self.proc.stdout.readline()   # READY
         self.born = time.time()
@@ -130,6 +133,17 @@ class Worker:
         self.seq = _BOOT_SEQ[0]
         _plog(f"Worker#{self.seq} 启动 pid={self.proc.pid} 就绪耗时 {time.time()-t0:.2f}s")
         threading.Thread(target=self._watch, daemon=True).start()
+        threading.Thread(target=self._pump_stderr, args=(self.seq,), daemon=True).start()
+
+    def _pump_stderr(self, seq):
+        """把 worker 的 stderr 转发到主进程日志，带 Worker 编号前缀。"""
+        try:
+            for line in self.proc.stderr:
+                line = line.rstrip('\n')
+                if line:
+                    print(f"[W{seq}] {line}", flush=True)
+        except Exception:
+            pass
 
     def _watch(self):
         """守候进程退出：记录退出码 + 运行时长。

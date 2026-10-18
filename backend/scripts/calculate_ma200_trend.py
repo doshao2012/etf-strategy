@@ -21,6 +21,7 @@ import sys
 import os
 import json
 import re
+import time
 from datetime import datetime
 
 import requests
@@ -73,12 +74,19 @@ def fetch_realtime():
         'quote_time': '',
         'is_after_hours': False,
     }
+    # 分段计时：线上排查"接口要 5 秒"时，必须知道是 DNS/连接慢、还是读取慢
+    t0 = time.time()
     try:
         # 连接与读取分开设超时：连不上时 3s 就放弃，避免切换 tab 时长时间白等
         resp = requests.get(SINA_URL, headers=SINA_HEADERS, timeout=(3, 5))
+        t1 = time.time()
         resp.encoding = 'gbk'
         text = resp.text
+        t2 = time.time()
+        print(f"[MA200计时] 新浪请求 {t1-t0:.3f}s (连接+首字节) / 读取body {t2-t1:.3f}s "
+              f"/ {len(text)}B", file=sys.stderr, flush=True)
     except Exception as e:
+        print(f"[MA200计时] 新浪请求失败 用时 {time.time()-t0:.3f}s: {e}", file=sys.stderr, flush=True)
         print(f"获取实时行情失败: {e}", file=sys.stderr)
         return result
 
@@ -197,6 +205,7 @@ def main():
     # 一旦数据源不通就要等满超时（腾讯 5s×2 重试 + 新浪 8s），页面会卡十几秒。
     # 真正的更新由后端后台线程（每 6 小时一次）和 update_qqq_history.py 负责。
     # 需要立即同步时传 --sync。
+    _T = time.time()
     update_info = {}
     try:
         from update_qqq_history import update as update_history
@@ -210,8 +219,12 @@ def main():
             print(f"历史数据同步提示: {update_info['error']}", file=sys.stderr)
     except Exception as e:
         print(f"历史数据状态读取异常（继续使用现有数据）: {e}", file=sys.stderr)
+    print(f"[MA200计时] 历史状态检查 {time.time()-_T:.3f}s", file=sys.stderr, flush=True)
+    _T = time.time()
 
     history, hist_updated = load_history()
+    print(f"[MA200计时] 读历史文件 {time.time()-_T:.3f}s ({len(history)} 条)", file=sys.stderr, flush=True)
+    _T = time.time()
     if len(history) < MA_PERIOD:
         print(json.dumps({
             'code': 500,
@@ -221,6 +234,8 @@ def main():
         return
 
     rt = fetch_realtime()
+    print(f"[MA200计时] 实时行情 {time.time()-_T:.3f}s", file=sys.stderr, flush=True)
+    _T = time.time()
     current_price = rt.get('qqq')
     tqqq_price = rt.get('tqqq')
 
@@ -315,7 +330,10 @@ def main():
         },
     }
 
+    print(f"[MA200计时] 计算 {time.time()-_T:.3f}s", file=sys.stderr, flush=True)
+    _T = time.time()
     print(json.dumps(output, ensure_ascii=False, indent=2))
+    print(f"[MA200计时] 输出 {time.time()-_T:.3f}s", file=sys.stderr, flush=True)
 
 
 if __name__ == '__main__':
