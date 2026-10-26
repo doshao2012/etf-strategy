@@ -33,8 +33,12 @@ export default function Ma200TrendCard({ data }: { data: Data }) {
   const style = ACTION_STYLE[advice.action] || ACTION_STYLE['持有'];
   const Icon = style.icon;
 
-  // ratio 距离下轨、上轨的位置，用于可视化进度（0.95 ~ 1.18 映射到 0~100%）
-  const progress = (r: number) => Math.min(Math.max(((r - 0.95) / (1.18 - 0.95)) * 100, 0), 100);
+  // ratio 到进度条的横向位置。区间上下界直接用后端下发的三条轨，不写死数字。
+  // 左端取 min(0.95, 下轨×0.97)，右端取 max(1.18, 上轨×1.05)，避免盘外行情把指针顶出条外。
+  const AXIS_LEFT = Math.min(0.95, params.lowerLine * 0.97);
+  const AXIS_RIGHT = Math.max(1.18, params.upperEntry * 1.05);
+  const progress = (r: number) =>
+    Math.min(Math.max(((r - AXIS_LEFT) / (AXIS_RIGHT - AXIS_LEFT)) * 100, 0), 100);
 
   return (
     <Card className="mb-3 bg-white border border-slate-200 shadow-sm">
@@ -117,14 +121,24 @@ export default function Ma200TrendCard({ data }: { data: Data }) {
 
             {/* 可视化轨道条 */}
             <div className="relative h-2.5 bg-slate-100 rounded-full mb-3">
-              {/* 空仓区间 0.95~1.01 */}
-              <div className="absolute h-2.5 bg-slate-200 rounded-l-full" style={{ left: 0, width: `${progress(params.lowerLine)}%` }} />
-              {/* TQQQ 区间 1.01~1.06 */}
+              {/* 下轨以下：清仓区（任何持仓到这里都要清空） */}
+              <div className="absolute h-2.5 bg-slate-300 rounded-l-full" style={{ left: 0, width: `${progress(params.lowerLine)}%` }} />
+              {/* 下轨 ~ 回落下轨：空仓者买 TQQQ；持 QQQ 者换回 TQQQ */}
               <div className="absolute h-2.5 bg-red-300" style={{ left: `${progress(params.lowerLine)}%`, width: `${progress(params.upperExit) - progress(params.lowerLine)}%` }} />
-              {/* QQQ 区间 1.06~1.18 */}
-              <div className="absolute h-2.5 bg-blue-300 rounded-r-full" style={{ left: `${progress(params.upperExit)}%`, width: `${100 - progress(params.upperExit)}%` }} />
+              {/* 回落下轨 ~ 上轨：滞回带，区间内不交易 */}
+              <div className="absolute h-2.5 bg-amber-200" style={{ left: `${progress(params.upperExit)}%`, width: `${progress(params.upperEntry) - progress(params.upperExit)}%` }} />
+              {/* 上轨以上：一律持 QQQ */}
+              <div className="absolute h-2.5 bg-blue-300 rounded-r-full" style={{ left: `${progress(params.upperEntry)}%`, width: `${100 - progress(params.upperEntry)}%` }} />
               {/* 当前位置指针 */}
               <div className="absolute w-1 h-5 bg-slate-800 rounded -top-1" style={{ left: `${progress(ratio)}%` }} />
+            </div>
+
+            {/* 轨道条图例：说清楚每个色块代表什么，尤其是中间那条不是仓位而是"不动" */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 mb-3">
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-slate-300 rounded-sm" />{params.lowerLine} 以下 空仓</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-red-300 rounded-sm" />{params.lowerLine}~{params.upperExit} 买 TQQQ</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-amber-200 rounded-sm" />{params.upperExit}~{params.upperEntry} 滞回带 · 不动</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 bg-blue-300 rounded-sm" />{params.upperEntry} 以上 持 QQQ</span>
             </div>
 
             <div className="grid grid-cols-3 gap-2">
@@ -150,6 +164,13 @@ export default function Ma200TrendCard({ data }: { data: Data }) {
                 </p>
               </div>
             </div>
+
+            {/* 滞回规则说明：澄清"1.06~1.14 持 QQQ"这个常见误读 */}
+            <p className="text-[11px] text-slate-500 mt-2.5 leading-relaxed">
+              <span className="font-medium text-amber-600">滞回带 {params.upperExit}~{params.upperEntry}</span>
+              ：区间内不产生交易。持 TQQQ 的继续持 TQQQ，持 QQQ 的继续持 QQQ，空仓者在此区间会买 TQQQ。
+              只有跌破 {params.lowerLine} 才清仓，涨破 {params.upperEntry} 才统一换成 QQQ。
+            </p>
           </div>
         )}
 

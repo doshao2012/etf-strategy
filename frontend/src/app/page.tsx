@@ -971,8 +971,10 @@ export default function ETFRotationPage() {
                         <p className="text-slate-500 text-[11px] leading-relaxed">QQQ 跌回 1.06 以下<br/>换回 TQQQ</p>
                       </div>
                     </div>
-                    <p className="text-slate-400 text-[11px] pt-1">
-                      1.01~1.06 持 TQQQ ｜ 1.06~1.14 持 QQQ ｜ 1.14 以上仍持 QQQ ｜ 1.01 以下空仓
+                    <p className="text-slate-500 text-[11px] pt-1.5 leading-relaxed">
+                      <span className="font-medium text-slate-600">注意 1.06~1.14 是「滞回带」：区间内不产生任何交易，持什么就继续持什么。</span>
+                      <br />
+                      同样一个 ratio 落在区间里，空仓者会买 TQQQ，持 QQQ 者却仍持 QQQ —— 结果只取决于你上一交易日拿着什么。
                     </p>
                   </div>
                 ) : isMeanReversionMode ? (
