@@ -51,6 +51,9 @@ interface RotationETF {
   atrTwoSupport: number | null;
   atrDistance: number | null;
   atrAlarm: boolean;
+  atrThreeSupport?: number | null;
+  atrThreeDistance?: number | null;
+  atrThreeAlarm?: boolean;
   dailyHistory: DailySnapshot[];
 }
 
@@ -272,7 +275,7 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
         {/* ATR 风控 */}
         {etf.atr20 !== null && (
           <div className="border-t border-slate-100 pt-2 mt-2">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-2">
               <div className="rounded-lg bg-slate-50 p-2 text-center">
                 <p className="text-xs text-slate-500 mb-1">ATR20</p>
                 <p className="text-sm font-semibold text-slate-700">{etf.atr20.toFixed(4)}</p>
@@ -289,6 +292,20 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
                     {etf.atrAlarm ? '⚠️ 已跌破' : '↗ 支撑上'}{' '}
                     <span className={etf.atrAlarm ? 'text-red-500' : 'text-emerald-500'}>
                       {etf.atrDistance >= 0 ? '+' : ''}{etf.atrDistance.toFixed(2)}%
+                    </span>
+                  </p>
+                )}
+              </div>
+              <div className={`rounded-lg p-2 text-center ${etf.atrThreeAlarm ? 'bg-red-50 ring-1 ring-red-300' : 'bg-slate-50'}`}>
+                <p className="text-xs text-slate-500 mb-1">3倍ATR支撑</p>
+                <p className="text-sm font-semibold text-slate-700">
+                  {etf.atrThreeSupport != null ? etf.atrThreeSupport.toFixed(3) : '-'}
+                </p>
+                {etf.atrThreeDistance != null && (
+                  <p className={`text-xs font-medium mt-0.5 ${etf.atrThreeAlarm ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {etf.atrThreeAlarm ? '⚠️ 已跌破' : '↗ 支撑上'}{' '}
+                    <span className={etf.atrThreeAlarm ? 'text-red-500' : 'text-emerald-500'}>
+                      {etf.atrThreeDistance >= 0 ? '+' : ''}{etf.atrThreeDistance.toFixed(2)}%
                     </span>
                   </p>
                 )}

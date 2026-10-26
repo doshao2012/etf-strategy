@@ -383,11 +383,14 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
             ene_upper = ene_lower = ene_dist_upper = ene_dist_lower = None
             ene_warn_upper = ene_warn_lower = False
 
-        # 7. ATR20 & 5日最高价距2倍ATR
+        # 7. ATR20 & 5日最高价距 2 倍 / 3 倍 ATR
         atr20 = None
         atr_two_support = None
+        atr_three_support = None
         atr_distance = None
         atr_alarm = False
+        atr_three_distance = None
+        atr_three_alarm = False
         five_day_high = None
         if len(data) >= 21 and all('high' in d and 'low' in d for d in data):
             tr_values = []
@@ -404,6 +407,10 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
                 atr_two_support = round(five_day_high - 2 * atr20, 3)
                 atr_distance = round((current_price - atr_two_support) / current_price * 100, 2)
                 atr_alarm = bool(current_price < atr_two_support)
+                # 3 倍 ATR 支撑：从同一高点再往下多减一个 ATR，位置更低、更宽松
+                atr_three_support = round(five_day_high - 3 * atr20, 3)
+                atr_three_distance = round((current_price - atr_three_support) / current_price * 100, 2)
+                atr_three_alarm = bool(current_price < atr_three_support)
 
         return {
             'code': etf_info['code'],
@@ -432,6 +439,9 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
             'atr_two_support': atr_two_support,
             'atr_distance': atr_distance,
             'atr_alarm': bool(atr_alarm),
+            'atr_three_support': atr_three_support,
+            'atr_three_distance': atr_three_distance,
+            'atr_three_alarm': bool(atr_three_alarm),
             'closes': [{'day': d['day'], 'close': d['close']} for d in data_slice[-10:]],
             'daily_history': get_daily_history(data, lookback_days)
         }
