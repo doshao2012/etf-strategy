@@ -717,7 +717,18 @@ def build_spread():
 
 
 # 分位数分档：用于前端给曲线分段着色
-# 0~10% 红 / 10~30% 黄 / 30~70% 深蓝 / 70~90% 天蓝 / 90~100% 绿
+#
+# 方向务必弄清：股债收益差 = 盈利收益率 − 10年国债收益率。
+# 差值【越大】= 股票盈利回报远超债券利息 = 股票相对债券【越便宜】。
+# 所以：
+#   分位 0~10%  差值最低 → 股票最贵  → 红
+#   分位 10~30% 偏贵              → 黄
+#   分位 30~70% 常态              → 深蓝
+#   分位 70~90% 偏便宜            → 天蓝
+#   分位 90~100% 差值最高 → 最便宜 → 绿
+#
+# 即：颜色只表达"分档高低位置"（红=最低位、绿=最高位），
+# 贵/便宜的语义由 cheap 字段单独给出，避免两套说法打架。
 SPREAD_BANDS = [
     (0, 10, 'red'),
     (10, 30, 'yellow'),
@@ -725,6 +736,15 @@ SPREAD_BANDS = [
     (70, 90, 'skyblue'),
     (90, 100, 'green'),
 ]
+
+# 分档 → (贵/便宜标签, 说明)。分位越高差值越大，股票越便宜。
+BAND_MEANING = {
+    'red': ('最贵', '差值处于历史最低位，股票相对债券最贵'),
+    'yellow': ('偏贵', '差值偏低，股票相对债券偏贵'),
+    'deepblue': ('常态', '差值处于历史常态区间'),
+    'skyblue': ('偏便宜', '差值偏高，股票相对债券偏便宜'),
+    'green': ('最便宜', '差值处于历史最高位，股票相对债券最便宜'),
+}
 
 
 def _percentile_of(v, sorted_vals):
@@ -747,52 +767,101 @@ def _band_of(pct):
     return SPREAD_BANDS[-1][2]
 
 
-def _spread_option(key, name, points):
-    """构建单个指数的股债收益差选项。
+def _annotate(points, sorted_vals):
+    """给每条点标注分位与分档（就地写入 pct / band）。
 
-    points 为全 10 年序列；每个点附带该日的历史分位与分档色，
-    前端可按区间（10年/5年）裁剪显示，颜色仍按全 10 年分位判定，
-    保证"红=历史最便宜的10%"这一语义在任何时间窗下都一致。
+    注意这里用【当前窗口自己的样本】算分位 —— 切到 5 年就用 5 年样本，
+    这样"当前处于近5年 90% 分位"才是真的 5 年分位，而不是拿 10 年分位数冒充。
     """
-    vals = [p['spread'] for p in points]
-    n = len(vals)
-    mean = sum(vals) / n
-    std = (sum((v - mean) ** 2 for v in vals) / n) ** 0.5
-    latest = points[-1]['spread']
-    below = sum(1 for v in vals if v < latest)
-
-    sorted_vals = sorted(vals)
-    # 逐点标注分位与分档（O(n log n)）
     for p in points:
         pct = _percentile_of(p['spread'], sorted_vals)
         p['pct'] = round(pct, 1) if pct is not None else None
         p['band'] = _band_of(pct)
 
-    # 各分位对应阈值（供前端画参考线 / 说明用）
+
+def _window_stats(points, sorted_vals):
+    """给定窗口的统计量（均值/σ/分位阈值），供前端画线用。"""
+    vals = [p['spread'] for p in points]
+    n = len(vals)
+    if not n:
+        return None
+    mean = sum(vals) / n
+    std = (sum((v - mean) ** 2 for v in vals) / n) ** 0.5
     m = len(sorted_vals)
 
     def q(frac):
         return round(sorted_vals[min(int(m * frac), m - 1)], 3)
 
-    thresholds = {'p10': q(0.10), 'p30': q(0.30), 'p70': q(0.70), 'p90': q(0.90)}
-
+    latest = points[-1]['spread']
+    below = sum(1 for v in vals if v < latest)
     return {
+        'mean': round(mean, 3),
+        'std': round(std, 3),
+        'plus1': round(mean + std, 3),
+        'minus1': round(mean - std, 3),
+        'max': round(max(vals), 3),
+        'min': round(min(vals), 3),
+        'current': latest,
+        'percentile': round(below / n * 100, 1),
+        'samples': n,
+        'start': points[0]['day'],
+        'end': points[-1]['day'],
+        'percentileThresholds': {'p10': q(0.10), 'p30': q(0.30), 'p70': q(0.70), 'p90': q(0.90)},
+    }
+
+
+def _spread_option(key, name, points):
+    """构建单个指数的股债收益差选项。
+
+    points 为全 10 年序列。同时输出 10 年 / 5 年两套窗口数据，
+    每套都按【自己的样本】重新算分位与分档 —— 切到 5 年时颜色就是
+    真·近5年分位，而不是拿 10 年分位数换皮。
+    """
+    out = {
         'key': key,
         'name': name,
+        # points 保留全量（供 10 年视图），5 年视图用 windows['5y'].points
         'points': points,
-        'percentileThresholds': thresholds,
-        'bands': [{'lo': lo, 'hi': hi, 'band': band} for lo, hi, band in SPREAD_BANDS],
-        'stats': {
-            'mean': round(mean, 3),
-            'std': round(std, 3),
-            'plus1': round(mean + std, 3),
-            'minus1': round(mean - std, 3),
-            'max': round(max(vals), 3),
-            'min': round(min(vals), 3),
-            'current': latest,
-            'percentile': round(below / n * 100, 1),
-        },
+        'bands': [
+            {'lo': lo, 'hi': hi, 'band': band, 'meaning': BAND_MEANING[band][0]}
+            for lo, hi, band in SPREAD_BANDS
+        ],
+        'windows': {},
     }
+
+    for win_years in (10, 5):
+        if win_years == 10:
+            pts = list(points)
+        else:
+            if not points:
+                continue
+            last = datetime.strptime(points[-1]['day'], '%Y-%m-%d')
+            cutoff = (last - timedelta(days=win_years * 365)).strftime('%Y-%m-%d')
+            pts = [dict(p) for p in points if p['day'] >= cutoff]
+            if len(pts) < 30:      # 样本太少就退回全量，避免分位失真
+                pts = [dict(p) for p in points]
+
+        sorted_vals = sorted(p['spread'] for p in pts)
+        _annotate(pts, sorted_vals)
+        st = _window_stats(pts, sorted_vals)
+        if st is None:
+            continue
+        band = pts[-1].get('band') or 'deepblue'
+        st['band'] = band
+        st['bandMeaning'] = BAND_MEANING[band][0]
+        out['windows'][f'{win_years}y'] = {
+            'years': win_years,
+            'points': pts,
+            'stats': st,
+            'percentileThresholds': st['percentileThresholds'],
+        }
+
+    # 兼容旧字段：顶层给 10 年那套，前端老逻辑仍可读
+    w10 = out['windows'].get('10y') or out['windows'].get('5y')
+    if w10:
+        out['stats'] = w10['stats']
+        out['percentileThresholds'] = w10['percentileThresholds']
+    return out
 
 
 def main():

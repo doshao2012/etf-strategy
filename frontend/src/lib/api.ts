@@ -226,6 +226,8 @@ export interface SpreadBandDef {
   /** 分位上界（不含，最后一档含 100） */
   hi: number;
   band: SpreadBand;
+  /** 该档对应的贵/便宜语义，如「最便宜」 */
+  meaning?: string;
 }
 
 export interface SpreadPoint {
@@ -233,10 +235,43 @@ export interface SpreadPoint {
   spread: number;
   ep: number;
   y10: number;
-  /** 该日差值在近10年历史中的分位（0~100） */
+  /** 该日差值在当前窗口内的分位（0~100） */
   pct?: number | null;
   /** 分位对应的分档色 */
   band?: SpreadBand | null;
+}
+
+export interface SpreadStats {
+  mean: number;
+  std: number;
+  plus1: number;
+  minus1: number;
+  max: number;
+  min: number;
+  current: number;
+  /** 当前值在当前窗口内的分位 */
+  percentile: number;
+  samples?: number;
+  start?: string;
+  end?: string;
+  band?: SpreadBand;
+  /** 贵/便宜语义，如「偏便宜」 */
+  bandMeaning?: string;
+}
+
+export interface SpreadPercentileThresholds {
+  p10: number;
+  p30: number;
+  p70: number;
+  p90: number;
+}
+
+/** 一个时间窗口（10年 / 5年）下的完整数据：分位、分档、统计量都按该窗口自己的样本重算 */
+export interface SpreadWindow {
+  years: number;
+  points: SpreadPoint[];
+  stats: SpreadStats;
+  percentileThresholds: SpreadPercentileThresholds;
 }
 
 export interface SpreadOption {
@@ -247,25 +282,13 @@ export interface SpreadOption {
   source?: string;
   /** 是否为推算值（非官方直接提供） */
   estimated?: boolean;
-  /** 各分位阈值对应的实际差值，用于画参考线 */
-  percentileThresholds?: {
-    p10: number;
-    p30: number;
-    p70: number;
-    p90: number;
-  };
   /** 分档定义，前端据此渲染图例 */
   bands?: SpreadBandDef[];
-  stats: {
-    mean: number;
-    std: number;
-    plus1: number;
-    minus1: number;
-    max: number;
-    min: number;
-    current: number;
-    percentile: number;
-  };
+  /** 多窗口数据：10年 / 5年 各自独立算分位 */
+  windows?: Record<string, SpreadWindow>;
+  /** 兼容字段：等同 windows['10y'] */
+  percentileThresholds?: SpreadPercentileThresholds;
+  stats: SpreadStats;
 }
 
 export interface SpreadData {
