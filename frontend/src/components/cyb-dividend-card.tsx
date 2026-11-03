@@ -325,6 +325,39 @@ export default function CybDividendCard({ data }: { data: Data }) {
           </div>
         </div>
 
+        {/* 状态分布：属于创业/红利比值，紧贴比值图下方 */}
+        <div className="mb-4 pt-3 border-t border-slate-100">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-slate-500">近 5 年各状态天数分布（创业板指/中证红利）</span>
+            <span className="text-xs text-slate-400">{totalDays} 个交易日</span>
+          </div>
+          <div className="grid grid-cols-6 gap-1.5">
+            {stateOrder.map((s) => {
+              const st = STATE_STYLE[s] || STATE_STYLE['中性'];
+              const days = distribution[s] ?? 0;
+              const share = totalDays ? (days / totalDays) * 100 : 0;
+              const isCurrent = s === data.state;
+              return (
+                <div key={s} className={`rounded-lg p-2 text-center ${isCurrent ? 'ring-1 ' + st.ring + ' bg-white' : 'bg-slate-50'}`}>
+                  <p className={`text-xs font-medium ${st.text}`}>{s}</p>
+                  <p className="text-sm font-semibold text-slate-700">{days}</p>
+                  <p className="text-[11px] text-slate-400">{share.toFixed(0)}%</p>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 阈值规则说明 */}
+          <p className="text-[11px] text-slate-500 mt-2.5 leading-relaxed">
+            阈值：<span className="text-blue-600 font-medium">&lt;{lines.sweepBottom} 抄底</span> ｜
+            <span className="text-sky-600 font-medium"> {lines.sweepBottom}~{lines.opportunity} 机会</span> ｜
+            <span className="text-cyan-600 font-medium"> {lines.opportunity}~{lines.watch} 观察</span> ｜
+            <span className="text-slate-600 font-medium"> {lines.watch}~{lines.alert} 中性</span> ｜
+            <span className="text-orange-600 font-medium"> {lines.alert}~{lines.escapeTop} 警戒</span> ｜
+            <span className="text-red-600 font-medium"> &gt;{lines.escapeTop} 逃顶</span>
+          </p>
+        </div>
+
         {/* 股债收益差：数据源不可用时明确提示，而不是静默消失 */}
         {spread && !spreadOption && (
           <div className="mb-4 pt-3 border-t border-slate-100">
@@ -426,39 +459,6 @@ export default function CybDividendCard({ data }: { data: Data }) {
             </p>
           </div>
         )}
-
-        {/* 状态分布 */}
-        <div className="pt-3 border-t border-slate-100">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-slate-500">近 5 年各状态天数分布</span>
-            <span className="text-xs text-slate-400">{totalDays} 个交易日</span>
-          </div>
-          <div className="grid grid-cols-6 gap-1.5">
-            {stateOrder.map((s) => {
-              const st = STATE_STYLE[s] || STATE_STYLE['中性'];
-              const days = distribution[s] ?? 0;
-              const share = totalDays ? (days / totalDays) * 100 : 0;
-              const isCurrent = s === data.state;
-              return (
-                <div key={s} className={`rounded-lg p-2 text-center ${isCurrent ? 'ring-1 ' + st.ring + ' bg-white' : 'bg-slate-50'}`}>
-                  <p className={`text-xs font-medium ${st.text}`}>{s}</p>
-                  <p className="text-sm font-semibold text-slate-700">{days}</p>
-                  <p className="text-[11px] text-slate-400">{share.toFixed(0)}%</p>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* 阈值规则说明 */}
-          <p className="text-[11px] text-slate-500 mt-2.5 leading-relaxed">
-            阈值：<span className="text-blue-600 font-medium">&lt;{lines.sweepBottom} 抄底</span> ｜
-            <span className="text-sky-600 font-medium"> {lines.sweepBottom}~{lines.opportunity} 机会</span> ｜
-            <span className="text-cyan-600 font-medium"> {lines.opportunity}~{lines.watch} 观察</span> ｜
-            <span className="text-slate-600 font-medium"> {lines.watch}~{lines.alert} 中性</span> ｜
-            <span className="text-orange-600 font-medium"> {lines.alert}~{lines.escapeTop} 警戒</span> ｜
-            <span className="text-red-600 font-medium"> &gt;{lines.escapeTop} 逃顶</span>
-          </p>
-        </div>
       </CardContent>
     </Card>
   );

@@ -544,31 +544,76 @@ def _fetch_index_pe_now(symbol):
 def _fetch_csindex_pe(index_code, years=SPREAD_YEARS + 1):
     """中证指数官网历史市盈率（日频、官方权威）。
 
-    接口返回的 `peg` 字段实为市盈率（实测 000300 当前 13.14，与腾讯 13.52、
-    蛋卷 13.504 同一量级）。一次请求可取 10 年全部日线。
+    接口返回的 `peg` 字段为市盈率，但口径是"计算用股本"（加权），
+    比主流 App（腾讯/蛋卷，13.5 左右）低约 3 个百分点 —— 实测
+    000300 同日：中证 peg 13.14 vs 腾讯 13.52 vs 蛋卷 13.504。
+
+    股债收益差必须用**主流口径**才和别人对得上，因此这里做口径校正：
+    用腾讯当日 PE 与该序列当日 PE 的比值作为校正系数，整条序列乘上去，
+    使其当前值与主流口径对齐（历史相对形状保持不变）。
     """
     start = (datetime.now() - timedelta(days=365 * years + 30)).strftime('%Y%m%d')
     end = datetime.now().strftime('%Y%m%d')
 
     def fetch():
-        r = requests.get(
-            'https://www.csindex.com.cn/csindex-home/perf/index-perf',
-            params={'indexCode': index_code, 'startDate': start, 'endDate': end},
-            headers={'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.csindex.com.cn/'},
-            timeout=(2, 8))
-        rows = (r.json() or {}).get('data') or []
-        out = []
-        for d in rows:
-            pe = d.get('peg')
-            if pe and float(pe) > 0:
-                day = d['tradeDate']
-                out.append({'day': f'{day[:4]}-{day[4:6]}-{day[6:8]}', 'pe': float(pe)})
-        if not out:
-            raise RuntimeError('中证接口返回空')
-        _log(f'中证 {index_code} PE {len(out)} 条 ({out[0]["day"]}~{out[-1]["day"]})')
-        return out
+        last = None
+        # 中证官网会间歇返回 403 反爬页面，重试 3 次
+        for attempt in range(3):
+            try:
+                r = requests.get(
+                    'https://www.csindex.com.cn/csindex-home/perf/index-perf',
+                    params={'indexCode': index_code, 'startDate': start, 'endDate': end},
+                    headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                                           'AppleWebKit/537.36 (KHTML, like Gecko) '
+                                           'Chrome/120.0 Safari/537.36',
+                             'Referer': 'https://www.csindex.com.cn/'},
+                    timeout=(2, 10))
+                if r.status_code != 200 or not r.text.lstrip().startswith('{'):
+                    last = RuntimeError(f'HTTP {r.status_code} 非JSON响应')
+                    time.sleep(1.2)
+                    continue
+                rows = (r.json() or {}).get('data') or []
+                out = []
+                for d in rows:
+                    pe = d.get('peg')
+                    if pe and float(pe) > 0:
+                        day = d['tradeDate']
+                        out.append({'day': f'{day[:4]}-{day[4:6]}-{day[6:8]}', 'pe': float(pe)})
+                if not out:
+                    last = RuntimeError('中证接口返回空')
+                    time.sleep(1.2)
+                    continue
+                out.sort(key=lambda x: x['day'])
+
+                # 口径校正：对齐到主流口径（腾讯/蛋卷）
+                adj, note = _pe_calibration(index_code, out[-1]['pe'])
+                if adj and abs(adj - 1) > 0.0005:
+                    for p in out:
+                        p['pe'] = round(p['pe'] * adj, 4)
+                    _log(f'中证 {index_code} 口径校正 ×{adj:.4f}（{note}）')
+
+                _log(f'中证 {index_code} PE {len(out)} 条 ({out[0]["day"]}~{out[-1]["day"]})')
+                return out
+            except Exception as e:
+                last = e
+                time.sleep(1.2)
+        raise last or RuntimeError('中证接口失败')
 
     return _cached_series(f'csindex_pe_{index_code}', fetch)
+
+
+def _pe_calibration(index_code, cs_pe):
+    """返回 (校正系数, 说明)。系数 = 主流口径PE / 中证口径PE。"""
+    symbol = {'000300': 'sh000300', '000985': 'sh000985'}.get(index_code)
+    if not symbol:
+        return 1.0, '无对照'
+    try:
+        main_pe = _fetch_index_pe_now(symbol)
+        if cs_pe > 0 and main_pe > 0:
+            return main_pe / cs_pe, f'中证 {cs_pe:.2f} → 腾讯 {main_pe:.2f}'
+    except Exception as e:
+        _log(f'{symbol} 取腾讯PE失败: {str(e)[:50]}')
+    return 1.0, '未校正'
 
 
 def _build_pe_from_price(symbol, name):
@@ -623,11 +668,11 @@ def build_spread():
             except Exception as e:
                 errors.append(f'{name} 中证失败: {str(e)[:50]}')
 
-            # 备用1：乐咕
+            # 备用1：乐咕（其 index-basic-pe 为月频，密度低，仅在无日频时使用）
             if not pe_series and time.time() < deadline:
                 try:
                     pe_series = _fetch_legu_index_pe(f'{cs_code}.SH', deadline=deadline)
-                    source = '乐咕乐股'
+                    source = '乐咕乐股（月频）'
                 except Exception:
                     pass
 
