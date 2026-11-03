@@ -555,13 +555,31 @@ export default function CybDividendCard({ data }: { data: Data }) {
                     );
                   })()}
 
-                  {/* 均值 ±1σ 参考线 */}
-                  <ReferenceLine y={curStats?.plus1 ?? 0} stroke="#2563eb" strokeDasharray="4 3" strokeWidth={1}
-                    label={{ value: `+1σ ${(curStats?.plus1 ?? 0).toFixed(2)}`, position: 'insideTopLeft', fontSize: 10, fill: '#2563eb' }} />
-                  <ReferenceLine y={curStats?.mean ?? 0} stroke="#94a3b8" strokeDasharray="4 3" strokeWidth={1}
-                    label={{ value: `均值 ${(curStats?.mean ?? 0).toFixed(2)}`, position: 'insideTopLeft', fontSize: 10, fill: '#64748b' }} />
-                  <ReferenceLine y={curStats?.minus1 ?? 0} stroke="#dc2626" strokeDasharray="4 3" strokeWidth={1}
-                    label={{ value: `-1σ ${(curStats?.minus1 ?? 0).toFixed(2)}`, position: 'insideBottomLeft', fontSize: 10, fill: '#dc2626' }} />
+                  {/* 四条分档分割线：p10 / p30 / p70 / p90，把图切成 5 个色带 */}
+                  {spreadView?.thresholds && (() => {
+                    const t = spreadView.thresholds!;
+                    const marks: Array<{ y: number; label: string; color: string; pos: 'insideBottomLeft' | 'insideTopLeft' }> = [
+                      { y: t.p10, label: `10% 分位 ${t.p10}`, color: SPREAD_BAND_STYLE.red.color, pos: 'insideBottomLeft' },
+                      { y: t.p30, label: `30% 分位 ${t.p30}`, color: SPREAD_BAND_STYLE.yellow.color, pos: 'insideTopLeft' },
+                      { y: t.p70, label: `70% 分位 ${t.p70}`, color: SPREAD_BAND_STYLE.deepblue.color, pos: 'insideBottomLeft' },
+                      { y: t.p90, label: `90% 分位 ${t.p90}`, color: SPREAD_BAND_STYLE.skyblue.color, pos: 'insideTopLeft' },
+                    ];
+                    return (
+                      <>
+                        {marks.map((m) => (
+                          <ReferenceLine
+                            key={m.label}
+                            y={m.y}
+                            stroke={m.color}
+                            strokeDasharray="5 3"
+                            strokeWidth={1}
+                            strokeOpacity={0.75}
+                            label={{ value: m.label, position: m.pos, fontSize: 10, fill: m.color }}
+                          />
+                        ))}
+                      </>
+                    );
+                  })()}
                   <ReferenceLine y={0} stroke="#cbd5e1" strokeWidth={1} />
 
                   {/* 五条分档线，各自只画自己那一段 */}
@@ -595,10 +613,16 @@ export default function CybDividendCard({ data }: { data: Data }) {
                   </span>
                 );
               })}
-              <span className="text-[11px] text-slate-300 ml-auto">
-                分位按近 {spreadView?.years ?? 10} 年样本计算（{spreadView?.stats.samples ?? '-'} 点）
-              </span>
             </div>
+
+            {/* 样本区间：分位口径差异全在起点，必须明确标出来 */}
+            {spreadView?.stats?.start && (
+              <p className="text-[11px] text-slate-400 mt-1">
+                分位基于 <span className="text-slate-500 font-medium">{spreadView.stats.start} ~ {spreadView.stats.end}</span>
+                {' '}共 <span className="text-slate-500 font-medium">{spreadView.stats.samples}</span> 个交易日
+                （近 {spreadView.years} 年）。换个起点分位会明显不同，与其他 App 对比时请先核对区间。
+              </p>
+            )}
 
             <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
               差值越大 = 股票盈利回报远超债券利息 = 股票相对债券越便宜。所以
@@ -606,7 +630,7 @@ export default function CybDividendCard({ data }: { data: Data }) {
               <span style={{ color: SPREAD_BAND_STYLE.red.color }} className="font-medium">越往下越贵</span>：
               <span style={{ color: SPREAD_BAND_STYLE.red.color }}>红=分位最低的10%（最贵）</span>、
               <span style={{ color: SPREAD_BAND_STYLE.green.color }}>绿=分位最高的10%（最便宜）</span>。
-              切换 5 年时，分位与配色都按近 5 年样本重新计算，颜色会随窗口变化。
+              四条虚线就是 10%/30%/70%/90% 分位对应的差值，切换窗口时它们会一起重算。
             </p>
           </div>
         )}
