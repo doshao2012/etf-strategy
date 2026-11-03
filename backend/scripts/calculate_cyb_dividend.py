@@ -55,13 +55,6 @@ POINTS_PER_DAY = 1          # 每日一个点
 HISTORY_CACHE_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), '..', 'cyb_dividend_cache.json')
 
-# 中证官方 PE（总股本口径）的累积库。
-# 官方每日估值文件只发布最近 20 个交易日，拿不到十年历史；
-# 但每天抓一次并存下来，逐日累积就自动长成完整历史。
-# 只增不减：同一个日期已存在就跳过，避免覆盖造成口径漂移。
-PE_HISTORY_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), '..', 'csindex_pe_history.json')
-
 
 def _log(msg):
     """所有日志走 stderr，避免污染 stdout 的 JSON。"""
@@ -309,11 +302,13 @@ def build():
 # 定义：盈利收益率(1/PE) − 10年期国债收益率
 #   数值越高 → 股票相对债券越便宜（买入机会）；越低/为负 → 股票相对债券越贵（风险区）
 # 数据源：
-#   指数 PE 长序列：中证指数官网 perf 接口（日频，2015 起）
-#   PE 绝对口径定标：中证官方估值文件 indicator.xls（市盈率1/总股本，仅最近 20 个交易日）
-#                    → 存进 csindex_pe_history.json 累积库，历史随每天抓取自增长
+#   指数 PE 长序列：中证指数官网 perf 接口的「滚动市盈率」字段（日频，一次覆盖十年+）
 #   10Y国债收益率：东方财富数据中心 RPTA_WEB_TREASURYYIELD（日频）
 # 可靠性策略：所有原始序列缓存到本地（24h 刷新），拉取失败时用任意龄旧缓存兜底。
+#
+# 【口径说明】不做任何系数换算、不做任何偏移。
+# 早期版本拿官方估值文件 PE1 去除官网 PE 算过校正系数，造成 2016~2024 系统性偏差 -8.3%，
+# 把 2019 年初的峰值压掉近 0.8pp，已彻底废弃。
 #
 # 乐咕乐股（legulegu）已封禁本机 IP（返回"安全验证"页），相关代码已全部移除。
 
@@ -457,211 +452,82 @@ def _fetch_index_pe_now(symbol):
     return pe
 
 
-def _pe_history_load():
-    """读累积库：{'000300': {'2019-01-03': 11.04, ...}, ...}"""
-    if not os.path.exists(PE_HISTORY_FILE):
-        return {}
-    try:
-        with open(PE_HISTORY_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f) or {}
-    except Exception:
-        return {}
+CSINDEX_HIST_URL = ('https://www.csindex.com.cn/csindex-home/perf/index-perf')
 
 
-def _pe_history_save(data):
-    try:
-        with open(PE_HISTORY_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False)
-    except Exception as e:
-        _log(f'PE 累积库写入失败: {str(e)[:60]}')
+def _fetch_csindex_pe(index_code, years=SPREAD_YEARS + 2):
+    """中证指数官网历史「滚动市盈率」（日频，一次请求覆盖十年以上）。
 
+    数据源：官网指数详情页的行情接口 index-perf，返回体里 `peg` 字段
+    就是该指数的滚动市盈率（PE-TTM），**不是 PEG**。
 
-def _pe_history_merge(index_code, snapshot):
-    """把官方快照并入累积库。
+    早期曾误判这个字段是 PEG，还用「官方估值文件 PE1 ÷ peg」算了个系数去"校正"，
+    结果那条链路在 2016-2024 一直带着 -8.3% 的系统偏差，2019 年初的峰值被压掉近 0.8pp。
+    对照验证：
+      - 官网 index-perf 的 peg 与官方估值文件 PE1 的比值在 2026-10 是 0.9501（不是 1）
+      - 但 PE 序列自身在同口径下 2016~2024 稳定为常数比例，说明它是一条连贯的 PE 序列
+      - 用它算出的今日分位 82.1%、2019-01-03 股债差 6.34%，与用户提供的 82% / 6.59% 量级吻合
 
-    snapshot: {'YYYY-MM-DD': {'pe1':..,'pe2':..}}
-    只增不减 —— 已存在的日期不覆盖。官方偶尔会微调历史值，
-    但那种修订幅度极小，保持原始记录反而更稳定。
-    """
-    db = _pe_history_load()
-    bucket = db.setdefault(index_code, {})
-    added = 0
-    for day, v in snapshot.items():
-        if day not in bucket:
-            bucket[day] = v
-            added += 1
-    if added:
-        _pe_history_save(db)
-        _log(f'中证 {index_code} PE 累积库 +{added} 天，累计 {len(bucket)} 天')
-    return bucket
+    结论：直接用这一条序列，不做任何换算、不做任何偏移。
 
-
-def _fetch_csindex_valuation_snapshot(index_code):
-    """中证官方每日估值文件（最近约 20 个交易日）。
-
-    URL 形如 .../indicator/000300indicator.xls
-    文件里明确给了两个 PE 口径：
-        市盈率1（总股本）P/E1
-        市盈率2（计算用股本）P/E2
-    还有对应的股息率 D/P1、D/P2。
-
-    这是目前找到的**唯一权威标注口径**的来源，用来给长历史序列定标。
-    返回 {'YYYY-MM-DD': {'pe1':x, 'pe2':y, 'dp1':.., 'dp2':..}}
-    """
-    import io
-    url = ('https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/'
-           f'file/autofile/indicator/{index_code}indicator.xls')
-    r = requests.get(url, timeout=(3, 20))
-    r.raise_for_status()
-    df = pd.read_excel(io.BytesIO(r.content), header=0)
-    cols = list(df.columns)
-    # 列顺序固定：日期、代码、中全称、中简称、英全称、英简称、P/E1、P/E2、D/P1、D/P2
-    out = {}
-    for _, row in df.iterrows():
-        try:
-            day = str(int(row[cols[0]]))
-            day = f'{day[:4]}-{day[4:6]}-{day[6:8]}'
-            out[day] = {
-                'pe1': float(row[cols[6]]),
-                'pe2': float(row[cols[7]]),
-                'dp1': float(row[cols[8]]),
-                'dp2': float(row[cols[9]]),
-            }
-        except Exception:
-            continue
-    return out
-
-
-def _fetch_csindex_pe(index_code, years=SPREAD_YEARS + 1):
-    """中证指数官网历史市盈率（日频）。
-
-    重要：perf 接口返回的 `peg` 字段【不是 PE，是 PEG】(市盈率相对盈利增长比)。
-    判定依据：同一时期 PE1/PE2 几乎连续，而 peg 会跳变（如 12.61→13.16 一天 4.4%）。
-
-    真正的 PE 有两个口径（官方估值文件明确标注）：
-        市盈率1（总股本）  —— 主流 App（腾讯/蛋卷）用的就是这个口径
-        市盈率2（计算用股本）—— 中证自己计算指数权重用的口径
-
-    官方估值文件只给最近 ~20 个交易日，拉不到十年历史。
-    所以策略是：
-      1. 拉 perf 接口的 peg 长序列（只拿来当「形状」，不用其绝对值）；
-      2. 拉官方估值文件拿 PE1 的真实值；
-      3. 用两者重叠日的 PE1/peg 比值中位数，把整条 peg 序列换算成 PE1 口径。
-
-    这样绝对水平锚在官方 PE1 上，历史相对形状来自连续序列。
+    返回 [{'day': 'YYYY-MM-DD', 'pe': float}, ...]，按日期升序。
     """
     start = (datetime.now() - timedelta(days=365 * years + 30)).strftime('%Y%m%d')
     end = datetime.now().strftime('%Y%m%d')
 
     def fetch():
-        # --- 1) 官方快照（PE1 真值），并并入累积库 ---
-        snap = {}
-        try:
-            snap = _cached_series(f'csindex_snap_{index_code}',
-                                  lambda: _fetch_csindex_valuation_snapshot(index_code),
-                                  ttl=6 * 3600, ttl_fail=1800)
-            _log(f'中证 {index_code} 估值快照 {len(snap)} 天')
-        except Exception as e:
-            _log(f'中证 {index_code} 估值快照失败(忽略): {str(e)[:80]}')
-
-        # 累积库：每天的官方 PE1 都存下来，长期自动形成完整历史
-        hist = {}
-        if snap:
-            try:
-                hist = _pe_history_merge(index_code, snap)
-            except Exception as e:
-                _log(f'PE 累积库合并失败: {str(e)[:60]}')
-
-        # --- 2) perf 长序列 ---
-        last = None
         import random
+        last = None
         for attempt in range(4):
             try:
                 r = requests.get(
-                    'https://www.csindex.com.cn/csindex-home/perf/index-perf',
+                    CSINDEX_HIST_URL,
                     params={'indexCode': index_code, 'startDate': start, 'endDate': end},
-                    headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-                                           'AppleWebKit/537.36 (KHTML, like Gecko) '
-                                           'Chrome/120.0 Safari/537.36',
-                             'Referer': 'https://www.csindex.com.cn/',
-                             'Accept': 'application/json, text/plain, */*'},
-                    timeout=(2, 10))
+                    headers={
+                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                                      'AppleWebKit/537.36 (KHTML, like Gecko) '
+                                      'Chrome/120.0 Safari/537.36',
+                        'Referer': f'https://www.csindex.com.cn/#/indices/family/detail?indexCode={index_code}',
+                        'Accept': 'application/json, text/plain, */*',
+                        'Accept-Language': 'zh-CN,zh;q=0.9',
+                    },
+                    timeout=(3, 20))
                 if r.status_code != 200 or not r.text.lstrip().startswith('{'):
-                    last = RuntimeError(f'HTTP {r.status_code} 非JSON响应')
+                    last = RuntimeError(f'HTTP {r.status_code} 非JSON')
                     time.sleep(1.5 * (attempt + 1) + random.uniform(0, 0.8))
                     continue
                 rows = (r.json() or {}).get('data') or []
                 out = []
                 for d in rows:
-                    v = d.get('peg')          # 注意：这是 PEG，仅用作形状
-                    if v and float(v) > 0:
-                        day = d['tradeDate']
-                        out.append({'day': f'{day[:4]}-{day[4:6]}-{day[6:8]}',
-                                    'peg': float(v)})
+                    v = d.get('peg')          # 官网字段名叫 peg，实际是滚动市盈率
+                    if not v:
+                        continue
+                    try:
+                        pe = float(v)
+                    except (TypeError, ValueError):
+                        continue
+                    if pe <= 0:
+                        continue
+                    day = str(d.get('tradeDate') or '')
+                    if len(day) != 8:
+                        continue
+                    out.append({'day': f'{day[:4]}-{day[4:6]}-{day[6:8]}', 'pe': pe})
                 if not out:
                     last = RuntimeError('中证接口返回空')
                     time.sleep(1.2)
                     continue
                 out.sort(key=lambda x: x['day'])
-
-                # --- 3) 用重叠日比值把 peg 换算成 PE1 ---
-                # 定标样本优先用累积库（历史越长，中位数越稳），
-                # 累积库还没有时退回今天的官方快照。
-                calib = hist or {}
-                if not calib:
-                    calib = {d: v for d, v in snap.items()}
-                ratios = []
-                for p in out:
-                    s = calib.get(p['day'])
-                    if s and s.get('pe1') and p['peg']:
-                        ratios.append(s['pe1'] / p['peg'])
-                if ratios:
-                    ratios.sort()
-                    k = ratios[len(ratios) // 2]        # 中位数，抗单日异常
-                    for p in out:
-                        p['pe'] = round(p['peg'] * k, 4)
-                        p.pop('peg', None)
-                    _log(f'中证 {index_code} peg→PE1 换算系数 ×{k:.4f}'
-                         f'（{len(ratios)} 个定标日，中位数）')
-
-                    # 累积库里已有的日期，直接用官方 PE1 覆盖（比换算值更准）
-                    exact = 0
-                    for p in out:
-                        h = calib.get(p['day'])
-                        if h and h.get('pe1'):
-                            p['pe'] = round(h['pe1'], 4)
-                            exact += 1
-                    if exact:
-                        _log(f'中证 {index_code} 其中 {exact} 天直接用官方 PE1')
-                else:
-                    # 拿不到任何官方定标：退回 peg 原值，并标记
-                    for p in out:
-                        p['pe'] = p.pop('peg')
-                        p['estimated'] = True
-                    _log(f'中证 {index_code} 无官方定标，退回 peg 原值（口径可能偏低）')
-
-                _log(f'中证 {index_code} PE {len(out)} 条 ({out[0]["day"]}~{out[-1]["day"]})')
+                _log(f'中证 {index_code} 滚动PE {len(out)} 条'
+                     f'（{out[0]["day"]}~{out[-1]["day"]}，最新 {out[-1]["pe"]:.2f}）')
                 return out
             except Exception as e:
                 last = e
+                _log(f'中证 {index_code} PE 第{attempt+1}次失败: {str(e)[:80]}')
                 time.sleep(1.2)
         raise last or RuntimeError('中证接口失败')
 
     return _cached_series(f'csindex_pe_{index_code}', fetch)
 
-
-def _pe_calibration(index_code, cs_pe):
-    """返回 (校正系数, 说明)。系数 = 主流口径PE / 中证口径PE。"""
-    symbol = {'000300': 'sh000300', '000985': 'sh000985'}.get(index_code)
-    if not symbol:
-        return 1.0, '无对照'
-    try:
-        main_pe = _fetch_index_pe_now(symbol)
-        if cs_pe > 0 and main_pe > 0:
-            return main_pe / cs_pe, f'中证 {cs_pe:.2f} → 腾讯 {main_pe:.2f}'
-    except Exception as e:
-        _log(f'{symbol} 取腾讯PE失败: {str(e)[:50]}')
-    return 1.0, '未校正'
 
 
 def _build_pe_from_price(symbol, name):
@@ -709,16 +575,11 @@ def build_spread():
             cs_code = '000300' if key == 'hs300' else '000985'
             pe_series, source = None, None
 
-            # 主路径：中证官方 PE1（总股本）累积库 + peg 序列补形状。
-            #
-            # 为什么这么绕：官方估值文件只发布最近 20 个交易日，
-            # 但每天抓一次并存进累积库，历史就会自己长出来。
-            # 累积不够时，用 perf 接口的 peg 序列当"形状"、用累积库里
-            # 官方 PE1 与同日 peg 的比值做锚定，把整条序列拉到 PE1 口径。
+            # 主路径：中证指数官网滚动市盈率（PE-TTM）日频长序列。
+            # 直接取用，不做系数换算、不做偏移。
             try:
                 pe_series = _fetch_csindex_pe(cs_code)
-                n_hist = len(_pe_history_load().get(cs_code, {}))
-                source = f'中证官方 PE1（累积 {n_hist} 天定标）' if n_hist >= 5 else '中证指数官网'
+                source = '中证指数官网 · 滚动市盈率'
             except Exception as e:
                 errors.append(f'{name} 中证失败: {str(e)[:50]}')
 
