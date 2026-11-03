@@ -317,6 +317,13 @@ EM_10Y_FIELD = 'EMM00166466'   # 中国国债收益率10年
 SPREAD_YEARS = 10              # 最长显示十年
 CACHE_TTL = 24 * 3600
 
+# 股债收益差的"股"标的：腾讯行情代码 → 展示名
+# 腾讯指数行情字段 [39] 就是当前市盈率（与蛋卷/乐咕口径一致，实测 13.52 vs 13.504）
+SPREAD_INDEXES = [
+    ('sh000300', '沪深300'),
+    ('sh000985', '全部A股'),   # 中证全指，覆盖全市场
+]
+
 
 def _load_cache2():
     return _cache_load()
@@ -518,12 +525,80 @@ def _merge_pe_yield(pe_series, y10_map):
     return result
 
 
+def _fetch_index_pe_now(symbol):
+    """从腾讯指数行情取当前 PE（字段[39]）。实测与蛋卷/乐咕口径一致。
+    这是整个推算的锚点，必须拿到。"""
+    r = requests.get(f'https://qt.gtimg.cn/q={symbol}',
+                     timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+    r.encoding = 'gbk'
+    body = r.text.split('="', 1)[-1].rstrip('";\n')
+    f = body.split('~')
+    if len(f) < 40 or not f[39]:
+        raise RuntimeError(f'{symbol} 行情无PE字段')
+    pe = float(f[39])
+    if pe <= 0:
+        raise RuntimeError(f'{symbol} PE非正数')
+    return pe
+
+
+def _fetch_csindex_pe(index_code, years=SPREAD_YEARS + 1):
+    """中证指数官网历史市盈率（日频、官方权威）。
+
+    接口返回的 `peg` 字段实为市盈率（实测 000300 当前 13.14，与腾讯 13.52、
+    蛋卷 13.504 同一量级）。一次请求可取 10 年全部日线。
+    """
+    start = (datetime.now() - timedelta(days=365 * years + 30)).strftime('%Y%m%d')
+    end = datetime.now().strftime('%Y%m%d')
+
+    def fetch():
+        r = requests.get(
+            'https://www.csindex.com.cn/csindex-home/perf/index-perf',
+            params={'indexCode': index_code, 'startDate': start, 'endDate': end},
+            headers={'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.csindex.com.cn/'},
+            timeout=(2, 8))
+        rows = (r.json() or {}).get('data') or []
+        out = []
+        for d in rows:
+            pe = d.get('peg')
+            if pe and float(pe) > 0:
+                day = d['tradeDate']
+                out.append({'day': f'{day[:4]}-{day[4:6]}-{day[6:8]}', 'pe': float(pe)})
+        if not out:
+            raise RuntimeError('中证接口返回空')
+        _log(f'中证 {index_code} PE {len(out)} 条 ({out[0]["day"]}~{out[-1]["day"]})')
+        return out
+
+    return _cached_series(f'csindex_pe_{index_code}', fetch)
+
+
+def _build_pe_from_price(symbol, name):
+    """最后的兜底：用腾讯实时PE作锚点 + 历史价格比例反推 PE。
+
+    精度不如官方数据（忽略了盈利变化），但能保证"曲线形状可用"，
+    且前端会标记为"推算"。仅在主数据源全挂时使用。
+    """
+    hist = fetch_history(symbol, HISTORY_DAYS)
+    if not hist:
+        raise RuntimeError(f'{name} 历史价格不可用')
+    pe_now = _fetch_index_pe_now(symbol)
+    now_close = hist[-1]['close'] or 1
+    out = [{'day': h['day'], 'pe': round(pe_now * (h['close'] / now_close), 3)}
+           for h in hist if h['close']]
+    if not out:
+        raise RuntimeError(f'{name} 推算失败')
+    _log(f'{name} 腾讯兜底推算 {len(out)} 条（锚点PE {pe_now}）')
+    return out
+
+
 def build_spread():
     """构建股债收益差。
-    防御设计（线上服务器访问国内数据源可能很慢）：
-    1. 整体 deadline 12s，任一步超时立即放弃，绝不拖死整个策略接口；
-    2. 构建结果整体缓存 12h，失败时用上次成功的产物兜底；
-    3. 完全没有数据时返回 None，前端只少显示一个图，比值部分照常。"""
+    数据源优先级：
+      1) 中证指数官网：官方日频历史PE（主路径，权威、10年全覆盖、单次请求）
+      2) 乐咕乐股：备用历史PE
+      3) 腾讯实时PE：仅当上面都失败时作为锚点标注当前值（画不出历史）
+    防御设计：
+      - 整体 deadline 8s；构建结果缓存 12h；失败结果缓存 30min；
+      - 完全没数据时返回 error 字段，前端显示提示，不影响比值部分。"""
     t0 = time.time()
 
     def fetch_all():
@@ -536,29 +611,49 @@ def build_spread():
 
         options = []
         errors = []
-        if time.time() < deadline + 2:
+        for symbol, name in SPREAD_INDEXES:
+            key = 'hs300' if symbol.endswith('000300') else 'allA'
+            cs_code = '000300' if key == 'hs300' else '000985'
+            pe_series, source = None, None
+
+            # 主路径：中证官网官方日频PE
             try:
-                pe300 = _fetch_legu_index_pe('000300.SH', deadline=deadline)
-                pts300 = _merge_pe_yield([p for p in pe300 if p['day'] >= cutoff], y10_map)
-                if pts300:
-                    options.append(_spread_option('hs300', '沪深300', pts300))
-                else:
-                    errors.append('沪深300 PE为空')
+                pe_series = _fetch_csindex_pe(cs_code)
+                source = '中证指数官网'
             except Exception as e:
-                errors.append(f'沪深300: {e}')
-        if time.time() < deadline + 2:
-            try:
-                mkt = _fetch_legu_market_pe(5, deadline=deadline)
-                ptsall = _merge_pe_yield([p for p in mkt if p['day'] >= cutoff], y10_map)
-                if ptsall:
-                    options.append(_spread_option('allA', '全部A股', ptsall))
-                else:
-                    errors.append('全部A股 PE为空')
-            except Exception as e:
-                errors.append(f'全部A股: {e}')
+                errors.append(f'{name} 中证失败: {str(e)[:50]}')
+
+            # 备用1：乐咕
+            if not pe_series and time.time() < deadline:
+                try:
+                    pe_series = _fetch_legu_index_pe(f'{cs_code}.SH', deadline=deadline)
+                    source = '乐咕乐股'
+                except Exception:
+                    pass
+
+            # 备用2：腾讯实时PE + 价格推算（保证图不空）
+            if not pe_series:
+                try:
+                    pe_series = _build_pe_from_price(symbol, name)
+                    source = '腾讯（推算）'
+                except Exception as e:
+                    errors.append(f'{name} 腾讯兜底失败: {str(e)[:40]}')
+
+            if not pe_series:
+                continue
+            pts = _merge_pe_yield([p for p in pe_series if p['day'] >= cutoff], y10_map)
+            if pts:
+                opt = _spread_option(key, name, pts)
+                opt['source'] = source
+                opt['estimated'] = '推算' in (source or '')
+                options.append(opt)
+            else:
+                errors.append(f'{name} 与国债数据无重叠')
+
         if not options:
             raise RuntimeError('；'.join(errors) or '没有任何股债收益差数据')
-        _log(f'股债收益差构建 {time.time()-t0:.2f}s，options={[(o["key"], len(o["points"])) for o in options]}')
+        _log(f'股债收益差构建 {time.time()-t0:.2f}s，'
+             f'options={[(o["key"], len(o["points"]), o.get("source")) for o in options]}')
         return {
             'definition': '盈利收益率(1/PE) − 10年期国债收益率',
             'options': options,
@@ -569,7 +664,6 @@ def build_spread():
     try:
         return _cached_series('spread_built', fetch_all, ttl=12 * 3600)
     except Exception as e:
-        # 失败也要把原因带回去，方便线上排查是哪个源不通
         return {'error': str(e)[:300], 'definition': '盈利收益率(1/PE) − 10年期国债收益率',
                 'options': [], 'default': 'hs300', 'years': SPREAD_YEARS}
 

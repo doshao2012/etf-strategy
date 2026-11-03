@@ -372,6 +372,9 @@ export default function CybDividendCard({ data }: { data: Data }) {
                 {' '}{spreadOption.stats.current.toFixed(2)}%{' '}
               </span>
               （近{spread.years}年分位 {spreadOption.stats.percentile}%）
+              {spreadOption.source && (
+                <span className="text-slate-300"> · 数据：{spreadOption.source}{spreadOption.estimated ? '（推算）' : ''}</span>
+              )}
             </p>
 
             <div className="h-[240px] w-full -ml-2">

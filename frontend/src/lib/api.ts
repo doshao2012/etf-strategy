@@ -228,6 +228,10 @@ export interface SpreadOption {
   key: string;
   name: string;
   points: SpreadPoint[];
+  /** 数据来源，如「中证指数官网」 */
+  source?: string;
+  /** 是否为推算值（非官方直接提供） */
+  estimated?: boolean;
   stats: {
     mean: number;
     std: number;
