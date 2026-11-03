@@ -217,11 +217,26 @@ export interface CybDividendPoint {
 }
 
 // 股债收益差
+/** 股债收益差分档：按历史分位给曲线染色 */
+export type SpreadBand = 'red' | 'yellow' | 'deepblue' | 'skyblue' | 'green';
+
+export interface SpreadBandDef {
+  /** 分位下界（含） */
+  lo: number;
+  /** 分位上界（不含，最后一档含 100） */
+  hi: number;
+  band: SpreadBand;
+}
+
 export interface SpreadPoint {
   day: string;
   spread: number;
   ep: number;
   y10: number;
+  /** 该日差值在近10年历史中的分位（0~100） */
+  pct?: number | null;
+  /** 分位对应的分档色 */
+  band?: SpreadBand | null;
 }
 
 export interface SpreadOption {
@@ -232,6 +247,15 @@ export interface SpreadOption {
   source?: string;
   /** 是否为推算值（非官方直接提供） */
   estimated?: boolean;
+  /** 各分位阈值对应的实际差值，用于画参考线 */
+  percentileThresholds?: {
+    p10: number;
+    p30: number;
+    p70: number;
+    p90: number;
+  };
+  /** 分档定义，前端据此渲染图例 */
+  bands?: SpreadBandDef[];
   stats: {
     mean: number;
     std: number;

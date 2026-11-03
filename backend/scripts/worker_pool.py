@@ -349,31 +349,30 @@ class WorkerPool:
         tag = '扩容worker' if grew else f'池内worker(存活{alive_before})'
         return w, tag
 
-# 脚本执行走独立线程池提交，主线程带超时等待。
-# 为什么必须这样：Worker.run 里 readline() 是阻塞调用且无法直接设超时，
-# 一旦脚本卡死（如访问外网被拖住），readline 永远不返回、worker 锁永不释放，
-# 该请求挂死、后续请求全部排队 —— 线上表现为接口"永远转圈"。
-# 有了超时看门狗：超时即杀 worker（杀进程后 readline 返回 EOF，阻塞线程自动退出），
-# 请求快速失败，用户看到的是报错而不是无限加载。
-_EXEC_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix='scriptexec')
+    def _exec(self, w, path, args, timeout):
+        """执行一次，返回 (是否已把锁交接出去, 结果字典)。带硬超时看门狗。
 
-
-def _exec(self, w, path, args, timeout):
-    """执行一次，返回 (是否已把锁交接出去, 结果字典)。带硬超时看门狗。"""
-    fut = _EXEC_POOL.submit(w.run, path, args, timeout)
-    try:
-        ok, body = fut.result(timeout=timeout + 2)
-        return False, {'ok': ok, 'stdout': body, 'stderr': '', 'via': '池内worker'}
-    except _FutureTimeout:
-        # 超时：杀掉 worker（readline 因此返回 EOF，卡住的线程会自己结束）
-        self._discard(w)
+        为什么必须走线程池 + fut.result(timeout)：Worker.run 里的 readline()
+        是阻塞调用且无法设超时。脚本一旦卡死（典型场景是访问外网被拖住），
+        readline 永不返回、worker 锁永不释放，该请求挂死、后续请求全部排队
+        —— 线上表现就是接口"永远转圈"。
+        超时即杀 worker（杀进程后 readline 返回 EOF，阻塞线程自然退出），
+        让请求快速失败，用户看到明确报错而不是无限加载。
+        """
+        fut = _EXEC_POOL.submit(w.run, path, args, timeout)
         try:
-            w.lock.release()
-        except Exception:
-            pass
-        return False, {'ok': False, 'stdout': '',
-                       'stderr': f'脚本执行超时（>{timeout}s），已强制终止: {os.path.basename(path)}'}
-    except Exception as e:
+            ok, body = fut.result(timeout=timeout + 2)
+            return False, {'ok': ok, 'stdout': body, 'stderr': '', 'via': '池内worker'}
+        except _FutureTimeout:
+            # 超时：杀掉 worker，卡住的线程会因 EOF 自行结束
+            self._discard(w)
+            try:
+                w.lock.release()
+            except Exception:
+                pass
+            return False, {'ok': False, 'stdout': '',
+                           'stderr': f'脚本执行超时（>{timeout}s），已强制终止: {os.path.basename(path)}'}
+        except Exception as e:
             # worker 已死（被 OOM / 外部杀掉）：摘掉并后台补位。
             # 本次请求换一个存活的 worker 重试，不让用户承担重建成本。
             self._discard(w)
@@ -401,6 +400,11 @@ def _exec(self, w, path, args, timeout):
                     except Exception:
                         pass
             return False, {'ok': False, 'stdout': '', 'stderr': str(last_err)}
+
+
+# 脚本执行走独立线程池，主线程带超时等待。放在类外是因为 ThreadPoolExecutor
+# 只有一份，所有 worker 共用。
+_EXEC_POOL = ThreadPoolExecutor(max_workers=8, thread_name_prefix='scriptexec')
 
 
 _POOL = None

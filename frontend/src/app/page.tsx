@@ -165,7 +165,7 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
               <div className="mt-2 p-2 bg-blue-50 rounded border border-blue-200 text-xs">
                 <div className="flex items-center gap-3 mb-1.5">
                   <span className="font-medium text-blue-800">{etf.dailyHistory[selectedDay].day} 快照</span>
-                  <span className="text-blue-600">价: {etf.dailyHistory[selectedDay].price.toFixed(3)}</span>
+                  <span className="text-blue-600">价: {(etf.dailyHistory[selectedDay]?.price ?? 0).toFixed(3)}</span>
                   <button onClick={() => setSelectedDay(null)} className="ml-auto text-blue-500 hover:text-blue-700">返回当前</button>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
@@ -274,7 +274,7 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
         </div>
 
         {/* ATR 风控 */}
-        {etf.atr20 !== null && (
+        {etf.atr20 != null && (
           <div className="border-t border-slate-100 pt-2 mt-2">
             <div className="grid grid-cols-4 gap-2">
               <div className="rounded-lg bg-slate-50 p-2 text-center">
@@ -288,11 +288,11 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
               <div className={`rounded-lg p-2 text-center ${etf.atrAlarm ? 'bg-red-50 ring-1 ring-red-300' : 'bg-slate-50'}`}>
                 <p className="text-xs text-slate-500 mb-1">2倍ATR支撑</p>
                 <p className="text-sm font-semibold text-slate-700">{etf.atrTwoSupport?.toFixed(3)}</p>
-                {etf.atrDistance !== null && (
+                {etf.atrDistance != null && (
                   <p className={`text-xs font-medium mt-0.5 ${etf.atrAlarm ? 'text-red-600' : 'text-emerald-600'}`}>
                     {etf.atrAlarm ? '⚠️ 已跌破' : '↗ 支撑上'}{' '}
                     <span className={etf.atrAlarm ? 'text-red-500' : 'text-emerald-500'}>
-                      {etf.atrDistance >= 0 ? '+' : ''}{etf.atrDistance.toFixed(2)}%
+                      {etf.atrDistance >= 0 ? '+' : ''}{(etf.atrDistance ?? 0).toFixed(2)}%
                     </span>
                   </p>
                 )}
@@ -306,7 +306,7 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
                   <p className={`text-xs font-medium mt-0.5 ${etf.atrThreeAlarm ? 'text-red-600' : 'text-emerald-600'}`}>
                     {etf.atrThreeAlarm ? '⚠️ 已跌破' : '↗ 支撑上'}{' '}
                     <span className={etf.atrThreeAlarm ? 'text-red-500' : 'text-emerald-500'}>
-                      {etf.atrThreeDistance >= 0 ? '+' : ''}{etf.atrThreeDistance.toFixed(2)}%
+                      {etf.atrThreeDistance >= 0 ? '+' : ''}{(etf.atrThreeDistance ?? 0).toFixed(2)}%
                     </span>
                   </p>
                 )}

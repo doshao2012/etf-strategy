@@ -557,8 +557,10 @@ def _fetch_csindex_pe(index_code, years=SPREAD_YEARS + 1):
 
     def fetch():
         last = None
-        # 中证官网会间歇返回 403 反爬页面，重试 3 次
-        for attempt in range(3):
+        # 中证官网会间歇返回 403 反爬页面（连续请求极易触发）。
+        # 退避重试 4 次，间隔递增 + 随机抖动，避开固定节奏的识别。
+        import random
+        for attempt in range(4):
             try:
                 r = requests.get(
                     'https://www.csindex.com.cn/csindex-home/perf/index-perf',
@@ -566,11 +568,12 @@ def _fetch_csindex_pe(index_code, years=SPREAD_YEARS + 1):
                     headers={'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
                                            'AppleWebKit/537.36 (KHTML, like Gecko) '
                                            'Chrome/120.0 Safari/537.36',
-                             'Referer': 'https://www.csindex.com.cn/'},
+                             'Referer': 'https://www.csindex.com.cn/',
+                             'Accept': 'application/json, text/plain, */*'},
                     timeout=(2, 10))
                 if r.status_code != 200 or not r.text.lstrip().startswith('{'):
                     last = RuntimeError(f'HTTP {r.status_code} 非JSON响应')
-                    time.sleep(1.2)
+                    time.sleep(1.5 * (attempt + 1) + random.uniform(0, 0.8))
                     continue
                 rows = (r.json() or {}).get('data') or []
                 out = []
@@ -713,17 +716,72 @@ def build_spread():
                 'options': [], 'default': 'hs300', 'years': SPREAD_YEARS}
 
 
+# 分位数分档：用于前端给曲线分段着色
+# 0~10% 红 / 10~30% 黄 / 30~70% 深蓝 / 70~90% 天蓝 / 90~100% 绿
+SPREAD_BANDS = [
+    (0, 10, 'red'),
+    (10, 30, 'yellow'),
+    (30, 70, 'deepblue'),
+    (70, 90, 'skyblue'),
+    (90, 100, 'green'),
+]
+
+
+def _percentile_of(v, sorted_vals):
+    """v 在 sorted_vals 中的分位（0~100）。用二分找插入位置，O(log n)。"""
+    import bisect
+    if not sorted_vals:
+        return None
+    idx = bisect.bisect_left(sorted_vals, v)
+    return idx / len(sorted_vals) * 100
+
+
+def _band_of(pct):
+    """分位 → 分档名。区间左闭右开，100 归入最后一档。"""
+    if pct is None:
+        return None
+    for i, (lo, hi, name) in enumerate(SPREAD_BANDS):
+        is_last = i == len(SPREAD_BANDS) - 1
+        if lo <= pct < hi or (is_last and pct >= lo):
+            return name
+    return SPREAD_BANDS[-1][2]
+
+
 def _spread_option(key, name, points):
+    """构建单个指数的股债收益差选项。
+
+    points 为全 10 年序列；每个点附带该日的历史分位与分档色，
+    前端可按区间（10年/5年）裁剪显示，颜色仍按全 10 年分位判定，
+    保证"红=历史最便宜的10%"这一语义在任何时间窗下都一致。
+    """
     vals = [p['spread'] for p in points]
     n = len(vals)
     mean = sum(vals) / n
     std = (sum((v - mean) ** 2 for v in vals) / n) ** 0.5
     latest = points[-1]['spread']
     below = sum(1 for v in vals if v < latest)
+
+    sorted_vals = sorted(vals)
+    # 逐点标注分位与分档（O(n log n)）
+    for p in points:
+        pct = _percentile_of(p['spread'], sorted_vals)
+        p['pct'] = round(pct, 1) if pct is not None else None
+        p['band'] = _band_of(pct)
+
+    # 各分位对应阈值（供前端画参考线 / 说明用）
+    m = len(sorted_vals)
+
+    def q(frac):
+        return round(sorted_vals[min(int(m * frac), m - 1)], 3)
+
+    thresholds = {'p10': q(0.10), 'p30': q(0.30), 'p70': q(0.70), 'p90': q(0.90)}
+
     return {
         'key': key,
         'name': name,
         'points': points,
+        'percentileThresholds': thresholds,
+        'bands': [{'lo': lo, 'hi': hi, 'band': band} for lo, hi, band in SPREAD_BANDS],
         'stats': {
             'mean': round(mean, 3),
             'std': round(std, 3),

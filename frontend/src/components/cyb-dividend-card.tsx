@@ -6,7 +6,7 @@ import {
   ComposedChart, LineChart, Line, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from 'recharts';
-import type { CybDividendResponse, CybDividendPoint, SpreadOption } from '@/lib/api';
+import type { CybDividendResponse, CybDividendPoint, SpreadOption, SpreadBand } from '@/lib/api';
 
 type Data = CybDividendResponse['data'];
 
@@ -25,6 +25,19 @@ function pct(v: number | null | undefined) {
   if (v === null || v === undefined) return '-';
   return `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
 }
+
+// 股债收益差分档配色：按历史分位染色。
+// 与上面「状态」的冷热语义一致 —— 蓝=便宜（股票相对债券有吸引力）、绿=极贵。
+// 注意这不是 K 线涨跌，不用红涨绿跌那套。
+const SPREAD_BAND_STYLE: Record<SpreadBand, { color: string; label: string; range: string; area: string }> = {
+  red: { color: '#dc2626', label: '极便宜', range: '0~10%', area: 'rgba(220,38,38,0.07)' },
+  yellow: { color: '#eab308', label: '偏便宜', range: '10~30%', area: 'rgba(234,179,8,0.07)' },
+  deepblue: { color: '#1e40af', label: '常态', range: '30~70%', area: 'rgba(30,64,175,0.05)' },
+  skyblue: { color: '#0ea5e9', label: '偏贵', range: '70~90%', area: 'rgba(14,165,233,0.07)' },
+  green: { color: '#16a34a', label: '极贵', range: '90~100%', area: 'rgba(22,163,74,0.07)' },
+};
+
+const SPREAD_BAND_ORDER: SpreadBand[] = ['red', 'yellow', 'deepblue', 'skyblue', 'green'];
 
 export default function CybDividendCard({ data }: { data: Data }) {
   const { growth, dividend, lines, series, stateOrder, distribution } = data;
@@ -107,30 +120,83 @@ export default function CybDividendCard({ data }: { data: Data }) {
 
   // ====== 股债收益差 ======
   const [spreadKey, setSpreadKey] = useState<string>(spread?.default || 'hs300');
+  // 区间：近 10 年 / 近 5 年
+  const [spreadRange, setSpreadRange] = useState<'10y' | '5y'>('10y');
   const spreadOption: SpreadOption | null =
     spread?.options?.find((o) => o.key === spreadKey) || spread?.options?.[0] || null;
 
+  // 按区间裁剪。颜色仍用后端按全 10 年算好的分位（band 字段），
+  // 这样「红=历史最便宜的10%」的语义在任何时间窗下都不变，
+  // 不会出现切到 5 年后同一数值换了个颜色。
   const spreadChart = useMemo(() => {
-    if (!spreadOption) return { pts: [], ticks: [] as string[] };
-    const pts = spreadOption.points.map((p) => ({ ...p }));
+    if (!spreadOption) return { pts: [] as NonNullable<SpreadOption['points']>, ticks: [] as string[], start: '', end: '' };
+    const all = spreadOption.points;
+    let pts = all;
+    if (spreadRange === '5y' && all.length) {
+      const last = new Date(all[all.length - 1].day).getTime();
+      const cutoff = last - 5 * 365 * 24 * 3600 * 1000;
+      pts = all.filter((p) => new Date(p.day).getTime() >= cutoff);
+      if (!pts.length) pts = all;
+    }
     const seen = new Set<string>();
     const ticks: string[] = [];
     pts.forEach((p) => {
       const y = p.day.slice(0, 4);
       if (!seen.has(y)) { seen.add(y); ticks.push(p.day); }
     });
-    return { pts, ticks };
-  }, [spreadOption]);
+    return {
+      pts,
+      ticks,
+      start: pts[0]?.day || '',
+      end: pts[pts.length - 1]?.day || '',
+    };
+  }, [spreadOption, spreadRange]);
+
+  // 分档着色关键技巧：把每个点复制成 5 个 y 键（v_red / v_yellow / ...），
+  // 只在该点属于当前档时保留数值，其余置 null。
+  // recharts 遇到 null 会断线，于是每条 Line 只画出自己那一档的片段，
+  // 连接处（band 切换点）用 connectNulls 衔接，视觉上就是一条连续的变色线。
+  const bandedPts = useMemo(() => {
+    return spreadChart.pts.map((p) => {
+      const row: Record<string, any> = { ...p };
+      SPREAD_BAND_ORDER.forEach((b) => {
+        row[`v_${b}`] = p.band === b ? p.spread : null;
+      });
+      return row;
+    });
+  }, [spreadChart.pts]);
+
+  // 相邻两点跨档时，用「过渡点」补齐，避免颜色之间出现 1 个交易日宽的白缝。
+  // 做法：在某点切换 band 时，把前一个 band 也补上该点的值。
+  const bandedPtsSmooth = useMemo(() => {
+    if (!bandedPts.length) return bandedPts;
+    const out = bandedPts.map((r) => ({ ...r }));
+    for (let i = 1; i < out.length; i++) {
+      const prevBand = spreadChart.pts[i - 1].band;
+      const curBand = spreadChart.pts[i].band;
+      if (prevBand && curBand && prevBand !== curBand) {
+        out[i][`v_${prevBand}`] = spreadChart.pts[i].spread;
+      }
+    }
+    return out;
+  }, [bandedPts, spreadChart.pts]);
 
   const spreadYDomain = useMemo(() => {
     if (!spreadOption) return [0, 1] as [number, number];
     const s = spreadOption.stats;
-    const vals = spreadOption.points.map((p) => p.spread).concat([s.plus1, s.minus1]);
+    const vals = spreadChart.pts.map((p) => p.spread).concat([s.plus1, s.minus1]);
+    if (!vals.length) return [0, 1] as [number, number];
     const lo = Math.min(...vals);
     const hi = Math.max(...vals);
     const pad = Math.max((hi - lo) * 0.1, 0.2);
     return [Number((lo - pad).toFixed(2)), Number((hi + pad).toFixed(2))] as [number, number];
-  }, [spreadOption]);
+  }, [spreadOption, spreadChart.pts]);
+
+  // 当前点所在档位
+  const curPts = spreadChart.pts;
+  const curPoint = curPts.length ? curPts[curPts.length - 1] : null;
+  const curBand: SpreadBand = (curPoint?.band as SpreadBand) || 'deepblue';
+  const curBandStyle = SPREAD_BAND_STYLE[curBand];
 
   return (
     <Card className="mb-3 bg-white border border-slate-200 shadow-sm">
@@ -383,7 +449,7 @@ export default function CybDividendCard({ data }: { data: Data }) {
           <div className="mb-4 pt-3 border-t border-slate-100">
             <div className="flex items-center justify-between mb-1">
               <span className="text-xs font-medium text-slate-600">
-                股债收益差（{spread.definition}，近 {spread.years} 年）
+                股债收益差（{spread.definition}）
               </span>
               <div className="flex items-center gap-1">
                 {spread.options.map((o) => (
@@ -397,27 +463,40 @@ export default function CybDividendCard({ data }: { data: Data }) {
                     {o.name}
                   </button>
                 ))}
+                <span className="w-px h-4 bg-slate-200 mx-0.5" />
+                {(['10y', '5y'] as const).map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setSpreadRange(r)}
+                    className={`px-2 py-0.5 text-xs rounded transition-colors ${
+                      spreadRange === r ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    }`}
+                  >
+                    {r === '10y' ? '近10年' : '近5年'}
+                  </button>
+                ))}
               </div>
             </div>
             <p className="text-[11px] text-slate-400 mb-2">
               = 盈利收益率(1/PE) − 10年期国债收益率 · 越高代表股票相对债券越便宜 · 当前
-              <span className={`font-medium ${spreadOption.stats.current > spreadOption.stats.plus1 ? 'text-blue-600' : spreadOption.stats.current < spreadOption.stats.minus1 ? 'text-red-600' : 'text-slate-600'}`}>
+              <span className="font-semibold" style={{ color: curBandStyle.color }}>
                 {' '}{spreadOption.stats.current.toFixed(2)}%{' '}
               </span>
-              （近{spread.years}年分位 {spreadOption.stats.percentile}%）
+              （近{spread.years}年分位 {curPoint?.pct ?? spreadOption.stats.percentile}%，
+              <span style={{ color: curBandStyle.color }}>{curBandStyle.label}</span>）
               {spreadOption.source && (
                 <span className="text-slate-300"> · 数据：{spreadOption.source}{spreadOption.estimated ? '（推算）' : ''}</span>
               )}
             </p>
 
-            <div className="h-[240px] w-full -ml-2">
+            <div className="h-[250px] w-full -ml-2">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={spreadChart.pts} margin={{ top: 6, right: 8, bottom: 0, left: 0 }}>
+                <LineChart data={bandedPtsSmooth} margin={{ top: 6, right: 8, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
                   <XAxis
                     dataKey="day"
                     ticks={spreadChart.ticks}
-                    tickFormatter={(v: string) => v.slice(0, 4) + '年'}
+                    tickFormatter={(v: string) => v.slice(0, 4)}
                     tick={{ fontSize: 10, fill: '#94a3b8' }}
                     axisLine={{ stroke: '#e2e8f0' }}
                     tickLine={false}
@@ -435,12 +514,30 @@ export default function CybDividendCard({ data }: { data: Data }) {
                     contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
                     labelFormatter={(l: string) => l}
                     formatter={(value: any, name: any) => {
-                      if (name === 'spread') return [`${Number(value).toFixed(2)}%`, '股债收益差'];
+                      if (String(name).startsWith('v_')) {
+                        const b = String(name).slice(2) as SpreadBand;
+                        const st = SPREAD_BAND_STYLE[b] || SPREAD_BAND_STYLE.deepblue;
+                        return [`${Number(value).toFixed(2)}%  ${st.label}`, '股债收益差'];
+                      }
                       if (name === 'ep') return [`${Number(value).toFixed(2)}%`, '盈利收益率'];
                       if (name === 'y10') return [`${Number(value).toFixed(2)}%`, '10Y国债'];
                       return [value, name];
                     }}
                   />
+
+                  {/* 分位档背景：一眼看出便宜/贵区间 */}
+                  {spreadOption.percentileThresholds && (() => {
+                    const t = spreadOption.percentileThresholds!;
+                    return (
+                      <>
+                        <ReferenceArea y1={spreadYDomain[0]} y2={t.p10} fill={SPREAD_BAND_STYLE.red.area} />
+                        <ReferenceArea y1={t.p10} y2={t.p30} fill={SPREAD_BAND_STYLE.yellow.area} />
+                        <ReferenceArea y1={t.p70} y2={t.p90} fill={SPREAD_BAND_STYLE.skyblue.area} />
+                        <ReferenceArea y1={t.p90} y2={spreadYDomain[1]} fill={SPREAD_BAND_STYLE.green.area} />
+                      </>
+                    );
+                  })()}
+
                   {/* 均值 ±1σ 参考线 */}
                   <ReferenceLine y={spreadOption.stats.plus1} stroke="#2563eb" strokeDasharray="4 3" strokeWidth={1}
                     label={{ value: `+1σ ${spreadOption.stats.plus1.toFixed(2)}`, position: 'insideTopLeft', fontSize: 10, fill: '#2563eb' }} />
@@ -449,13 +546,48 @@ export default function CybDividendCard({ data }: { data: Data }) {
                   <ReferenceLine y={spreadOption.stats.minus1} stroke="#dc2626" strokeDasharray="4 3" strokeWidth={1}
                     label={{ value: `-1σ ${spreadOption.stats.minus1.toFixed(2)}`, position: 'insideBottomLeft', fontSize: 10, fill: '#dc2626' }} />
                   <ReferenceLine y={0} stroke="#cbd5e1" strokeWidth={1} />
-                  <Line type="monotone" dataKey="spread" stroke="#7c3aed" strokeWidth={1.6} dot={false} isAnimationActive={false} />
+
+                  {/* 五条分档线，各自只画自己那一段 */}
+                  {SPREAD_BAND_ORDER.map((b) => (
+                    <Line
+                      key={b}
+                      type="linear"
+                      dataKey={`v_${b}`}
+                      stroke={SPREAD_BAND_STYLE[b].color}
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                      connectNulls={false}
+                    />
+                  ))}
                 </LineChart>
               </ResponsiveContainer>
             </div>
-            <p className="text-[11px] text-slate-400">
-              高于 +1σ：股票相对债券极便宜（历史级买入区）；低于 -1σ：股票相对债券极贵（风险区）。
-              {spreadOption.key === 'allA' && ' 全部A股为月频数据。'}
+
+            {/* 分档图例 */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
+              {SPREAD_BAND_ORDER.map((b) => {
+                const st = SPREAD_BAND_STYLE[b];
+                const isCur = b === curBand;
+                return (
+                  <span key={b} className={`inline-flex items-center gap-1 text-[11px] ${isCur ? 'font-semibold' : ''}`}
+                    style={{ color: isCur ? st.color : '#94a3b8' }}>
+                    <span className="inline-block w-3 h-[3px] rounded" style={{ background: st.color }} />
+                    {st.range} {st.label}
+                    {isCur && <span className="text-slate-400">（当前）</span>}
+                  </span>
+                );
+              })}
+              <span className="text-[11px] text-slate-300 ml-auto">
+                分位按近 {spread.years} 年全样本计算
+              </span>
+            </div>
+
+            <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+              颜色按历史分位染色：<span style={{ color: SPREAD_BAND_STYLE.red.color }}>红=最便宜的10%</span>（股票相对债券极有吸引力）、
+              <span style={{ color: SPREAD_BAND_STYLE.green.color }}>绿=最贵的10%</span>（风险区）。
+              切到近5年只是裁剪显示范围，颜色口径不变，同一数值不会换色。
+              高于 +1σ 为历史级买入区，低于 -1σ 为风险区。
             </p>
           </div>
         )}
