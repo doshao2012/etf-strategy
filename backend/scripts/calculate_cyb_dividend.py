@@ -588,13 +588,16 @@ def _fetch_csindex_pe(index_code, years=SPREAD_YEARS + 1):
                     continue
                 out.sort(key=lambda x: x['day'])
 
-                # 口径校正：对齐到主流口径（腾讯/蛋卷）
-                adj, note = _pe_calibration(index_code, out[-1]['pe'])
-                if adj and abs(adj - 1) > 0.0005:
-                    for p in out:
-                        p['pe'] = round(p['pe'] * adj, 4)
-                    _log(f'中证 {index_code} 口径校正 ×{adj:.4f}（{note}）')
-
+                # 不做统一口径校正。
+                #
+                # 曾经用「今日 腾讯PE/中证PE」算一个固定系数(≈1.0289)乘到整条历史上，
+                # 目的是让今日差值对齐其他 App。但这个做法有个硬伤：
+                # 系数只是"今天"两家口径的比值，历史上这个比值是浮动的
+                # （甚至可能小于 1），套到十年前等于给每个点凭空加约 0.2pp 偏移，
+                # 会把 2019 年初那种历史峰值压平。
+                #
+                # 中证官网的 peg 序列内部口径自洽，做分位/分档这种"相对比较"
+                # 恰恰应该用同一条自洽序列 —— 所以这里保留原始值。
                 _log(f'中证 {index_code} PE {len(out)} 条 ({out[0]["day"]}~{out[-1]["day"]})')
                 return out
             except Exception as e:
