@@ -3,10 +3,10 @@
 import { useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import {
-  ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid,
+  ComposedChart, LineChart, Line, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from 'recharts';
-import type { CybDividendResponse, CybDividendPoint } from '@/lib/api';
+import type { CybDividendResponse, CybDividendPoint, SpreadOption } from '@/lib/api';
 
 type Data = CybDividendResponse['data'];
 
@@ -29,6 +29,7 @@ function pct(v: number | null | undefined) {
 export default function CybDividendCard({ data }: { data: Data }) {
   const { growth, dividend, lines, series, stateOrder, distribution } = data;
   const style = STATE_STYLE[data.state] || STATE_STYLE['中性'];
+  const spread = data.spread;
 
   // 曲线区间：默认近 5 年，可切 1 年 / 3 年 / 全部
   const [range, setRange] = useState<'1y' | '3y' | '5y'>('5y');
@@ -103,6 +104,33 @@ export default function CybDividendCard({ data }: { data: Data }) {
   }, [shown, lines]);
 
   const totalDays = Object.values(distribution).reduce((a, b) => a + b, 0);
+
+  // ====== 股债收益差 ======
+  const [spreadKey, setSpreadKey] = useState<string>(spread?.default || 'hs300');
+  const spreadOption: SpreadOption | null =
+    spread?.options?.find((o) => o.key === spreadKey) || spread?.options?.[0] || null;
+
+  const spreadChart = useMemo(() => {
+    if (!spreadOption) return { pts: [], ticks: [] as string[] };
+    const pts = spreadOption.points.map((p) => ({ ...p }));
+    const seen = new Set<string>();
+    const ticks: string[] = [];
+    pts.forEach((p) => {
+      const y = p.day.slice(0, 4);
+      if (!seen.has(y)) { seen.add(y); ticks.push(p.day); }
+    });
+    return { pts, ticks };
+  }, [spreadOption]);
+
+  const spreadYDomain = useMemo(() => {
+    if (!spreadOption) return [0, 1] as [number, number];
+    const s = spreadOption.stats;
+    const vals = spreadOption.points.map((p) => p.spread).concat([s.plus1, s.minus1]);
+    const lo = Math.min(...vals);
+    const hi = Math.max(...vals);
+    const pad = Math.max((hi - lo) * 0.1, 0.2);
+    return [Number((lo - pad).toFixed(2)), Number((hi + pad).toFixed(2))] as [number, number];
+  }, [spreadOption]);
 
   return (
     <Card className="mb-3 bg-white border border-slate-200 shadow-sm">
@@ -296,6 +324,85 @@ export default function CybDividendCard({ data }: { data: Data }) {
             </ResponsiveContainer>
           </div>
         </div>
+
+        {/* 股债收益差 */}
+        {spread && spreadOption && (
+          <div className="mb-4 pt-3 border-t border-slate-100">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium text-slate-600">
+                股债收益差（{spread.definition}，近 {spread.years} 年）
+              </span>
+              <div className="flex items-center gap-1">
+                {spread.options.map((o) => (
+                  <button
+                    key={o.key}
+                    onClick={() => setSpreadKey(o.key)}
+                    className={`px-2 py-0.5 text-xs rounded transition-colors ${
+                      spreadKey === o.key ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    }`}
+                  >
+                    {o.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-400 mb-2">
+              = 盈利收益率(1/PE) − 10年期国债收益率 · 越高代表股票相对债券越便宜 · 当前
+              <span className={`font-medium ${spreadOption.stats.current > spreadOption.stats.plus1 ? 'text-blue-600' : spreadOption.stats.current < spreadOption.stats.minus1 ? 'text-red-600' : 'text-slate-600'}`}>
+                {' '}{spreadOption.stats.current.toFixed(2)}%{' '}
+              </span>
+              （近{spread.years}年分位 {spreadOption.stats.percentile}%）
+            </p>
+
+            <div className="h-[240px] w-full -ml-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={spreadChart.pts} margin={{ top: 6, right: 8, bottom: 0, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
+                  <XAxis
+                    dataKey="day"
+                    ticks={spreadChart.ticks}
+                    tickFormatter={(v: string) => v.slice(0, 4) + '年'}
+                    tick={{ fontSize: 10, fill: '#94a3b8' }}
+                    axisLine={{ stroke: '#e2e8f0' }}
+                    tickLine={false}
+                    minTickGap={20}
+                  />
+                  <YAxis
+                    domain={spreadYDomain}
+                    tick={{ fontSize: 10, fill: '#94a3b8' }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={40}
+                    tickFormatter={(v: number) => v.toFixed(1)}
+                  />
+                  <Tooltip
+                    contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
+                    labelFormatter={(l: string) => l}
+                    formatter={(value: any, name: any) => {
+                      if (name === 'spread') return [`${Number(value).toFixed(2)}%`, '股债收益差'];
+                      if (name === 'ep') return [`${Number(value).toFixed(2)}%`, '盈利收益率'];
+                      if (name === 'y10') return [`${Number(value).toFixed(2)}%`, '10Y国债'];
+                      return [value, name];
+                    }}
+                  />
+                  {/* 均值 ±1σ 参考线 */}
+                  <ReferenceLine y={spreadOption.stats.plus1} stroke="#2563eb" strokeDasharray="4 3" strokeWidth={1}
+                    label={{ value: `+1σ ${spreadOption.stats.plus1.toFixed(2)}`, position: 'insideTopLeft', fontSize: 10, fill: '#2563eb' }} />
+                  <ReferenceLine y={spreadOption.stats.mean} stroke="#94a3b8" strokeDasharray="4 3" strokeWidth={1}
+                    label={{ value: `均值 ${spreadOption.stats.mean.toFixed(2)}`, position: 'insideTopLeft', fontSize: 10, fill: '#64748b' }} />
+                  <ReferenceLine y={spreadOption.stats.minus1} stroke="#dc2626" strokeDasharray="4 3" strokeWidth={1}
+                    label={{ value: `-1σ ${spreadOption.stats.minus1.toFixed(2)}`, position: 'insideBottomLeft', fontSize: 10, fill: '#dc2626' }} />
+                  <ReferenceLine y={0} stroke="#cbd5e1" strokeWidth={1} />
+                  <Line type="monotone" dataKey="spread" stroke="#7c3aed" strokeWidth={1.6} dot={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              高于 +1σ：股票相对债券极便宜（历史级买入区）；低于 -1σ：股票相对债券极贵（风险区）。
+              {spreadOption.key === 'allA' && ' 全部A股为月频数据。'}
+            </p>
+          </div>
+        )}
 
         {/* 状态分布 */}
         <div className="pt-3 border-t border-slate-100">

@@ -216,6 +216,37 @@ export interface CybDividendPoint {
   state: string;
 }
 
+// 股债收益差
+export interface SpreadPoint {
+  day: string;
+  spread: number;
+  ep: number;
+  y10: number;
+}
+
+export interface SpreadOption {
+  key: string;
+  name: string;
+  points: SpreadPoint[];
+  stats: {
+    mean: number;
+    std: number;
+    plus1: number;
+    minus1: number;
+    max: number;
+    min: number;
+    current: number;
+    percentile: number;
+  };
+}
+
+export interface SpreadData {
+  definition: string;
+  options: SpreadOption[];
+  default: string;
+  years: number;
+}
+
 export interface CybDividendResponse {
   code: number;
   message: string;
@@ -257,6 +288,7 @@ export interface CybDividendResponse {
     timestamp: string;
     realtimeOk: boolean;
     dataSource: string;
+    spread?: SpreadData | null;
   };
 }
 

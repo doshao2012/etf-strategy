@@ -839,7 +839,7 @@ export default function ETFRotationPage() {
             <div>
               <h1 className="text-xl font-bold text-slate-800">ETF轮动策略</h1>
               <p className="text-xs text-slate-400">
-                {isCybDividendMode ? '创业红利轮动' : isMa200TrendMode ? '美股MA200趋势' : isMeanReversionMode ? '均值回归' : isOversoldMode ? '超跌策略' : '趋势轮动'}
+                {isCybDividendMode ? '市场情绪' : isMa200TrendMode ? '美股MA200趋势' : isMeanReversionMode ? '均值回归' : isOversoldMode ? '超跌策略' : '趋势轮动'}
               </p>
             </div>
             
@@ -853,7 +853,7 @@ export default function ETFRotationPage() {
                   <SelectItem value="meanReversion">均值回归</SelectItem>
                   <SelectItem value="oversold">超跌策略</SelectItem>
                   <SelectItem value="ma200Trend">美股MA200</SelectItem>
-                  <SelectItem value="cybDividend">创业红利轮动</SelectItem>
+                  <SelectItem value="cybDividend">市场情绪</SelectItem>
                 </SelectContent>
               </Select>
 
