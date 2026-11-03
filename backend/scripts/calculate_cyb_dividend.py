@@ -25,12 +25,11 @@
 import sys
 import json
 import os
-import re
 import time
-import hashlib
 from datetime import datetime, timedelta, date
 
 import requests
+import pandas as pd
 
 # ====== 标的定义 ======
 GROWTH_SYMBOL = 'sz399006'      # 创业板指
@@ -55,6 +54,13 @@ POINTS_PER_DAY = 1          # 每日一个点
 
 HISTORY_CACHE_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), '..', 'cyb_dividend_cache.json')
+
+# 中证官方 PE（总股本口径）的累积库。
+# 官方每日估值文件只发布最近 20 个交易日，拿不到十年历史；
+# 但每天抓一次并存下来，逐日累积就自动长成完整历史。
+# 只增不减：同一个日期已存在就跳过，避免覆盖造成口径漂移。
+PE_HISTORY_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', 'csindex_pe_history.json')
 
 
 def _log(msg):
@@ -303,14 +309,14 @@ def build():
 # 定义：盈利收益率(1/PE) − 10年期国债收益率
 #   数值越高 → 股票相对债券越便宜（买入机会）；越低/为负 → 股票相对债券越贵（风险区）
 # 数据源：
-#   沪深300 PE历史：乐咕乐股 index-basic-pe（000300.SH，日频，2005 起）
-#   全部A股 PE历史：乐咕乐股 market-ttm-lyr（marketId=5，月频，2005 起）
+#   指数 PE 长序列：中证指数官网 perf 接口（日频，2015 起）
+#   PE 绝对口径定标：中证官方估值文件 indicator.xls（市盈率1/总股本，仅最近 20 个交易日）
+#                    → 存进 csindex_pe_history.json 累积库，历史随每天抓取自增长
 #   10Y国债收益率：东方财富数据中心 RPTA_WEB_TREASURYYIELD（日频）
 # 可靠性策略：所有原始序列缓存到本地（24h 刷新），拉取失败时用任意龄旧缓存兜底。
+#
+# 乐咕乐股（legulegu）已封禁本机 IP（返回"安全验证"页），相关代码已全部移除。
 
-LEGU_TOKEN_URL = 'https://legulegu.com/stockdata/guxilv'
-LEGU_PE_URL = 'https://legulegu.com/api/stockdata/index-basic-pe'
-LEGU_MARKET_PE_URL = 'https://www.legulegu.com/api/stock-data/market-ttm-lyr'
 EM_BOND_URL = 'https://datacenter.eastmoney.com/api/data/get'
 EM_BOND_TOKEN = '894050c76af8597a853f5b408b759f5d'
 EM_10Y_FIELD = 'EMM00166466'   # 中国国债收益率10年
@@ -375,96 +381,6 @@ def _cached_series(key, fetcher, ttl=CACHE_TTL, ttl_fail=1800):
             _cache_save(cache2)
             raise
 
-
-def _legu_session(deadline):
-    """乐咕需要先访问页面拿 _csrf，再带 token 调 API。站点常限流，快速失败即可。
-    最多尝试 2 次、总计不超过 min(deadline, 3s)。"""
-    s = requests.Session()
-    s.headers.update({'User-Agent': 'Mozilla/5.0'})
-    csrf = None
-    hard_stop = min(deadline, time.time() + 3)
-    for _ in range(2):
-        if time.time() >= hard_stop:
-            break
-        try:
-            r = s.get(LEGU_TOKEN_URL, timeout=(1.5, 2.5))
-            m = re.search(r'name="_csrf"\s+content="([^"]+)"', r.text)
-            if m:
-                csrf = m.group(1)
-                break
-        except Exception as e:
-            _log(f'csrf 失败: {str(e)[:60]}')
-    if not csrf:
-        raise RuntimeError('乐咕站点不可达/限流')
-    token = hashlib.md5(date.today().isoformat().encode()).hexdigest()
-    return s, csrf, token
-
-
-def _legu_get_pe(index_code, deadline):
-    """取单个指数 PE。复用同一 csrf，失败重试 1 次（限流是随机的）。"""
-    last = None
-    for _ in range(2):
-        if time.time() >= deadline:
-            break
-        try:
-            s, csrf, token = _legu_session(deadline)
-            r = s.get(LEGU_PE_URL, params={'token': token, 'indexCode': index_code},
-                      headers={'X-CSRF-Token': csrf}, timeout=(2, 6))
-            rows = r.json().get('data') or []
-            out = [{'day': d['date'], 'pe': float(d['ttmPe'])} for d in rows if d.get('ttmPe')]
-            if out:
-                _log(f'legu PE {index_code}: {len(out)} 条')
-                return out
-            last = RuntimeError('返回空')
-        except Exception as e:
-            last = e
-            _log(f'legu PE {index_code} 尝试失败: {str(e)[:60]}')
-        time.sleep(1.2)
-    raise last or RuntimeError('PE 获取失败')
-
-
-def _fetch_legu_index_pe(index_code, deadline=None):
-    """沪深300 等指数的 PE 历史（月频）。返回 [{day, pe}]，pe 为整体法 TTM。"""
-    def fetch():
-        return _legu_get_pe(index_code, deadline or (time.time() + 10))
-    return _cached_series(f'legu_pe_{index_code}', fetch)
-
-
-def _fetch_legu_market_pe(market_id, deadline=None):
-    """全市场 PE（月频）。marketId=5 为全部A股。"""
-    def fetch():
-        dl = deadline or (time.time() + 10)
-        s = requests.Session()
-        s.headers.update({'User-Agent': 'Mozilla/5.0'})
-        csrf = None
-        hard_stop = min(dl, time.time() + 3)
-        for _ in range(2):
-            if time.time() >= hard_stop:
-                break
-            try:
-                r = s.get('https://www.legulegu.com/stockdata/a-ttm-lyr', timeout=(1.5, 2.5))
-                m = re.search(r'name="_csrf"\s+content="([^"]+)"', r.text)
-                if m:
-                    csrf = m.group(1)
-                    break
-            except Exception:
-                pass
-        if not csrf:
-            raise RuntimeError('乐咕站点不可达/限流')
-        token = hashlib.md5(date.today().isoformat().encode()).hexdigest()
-        r = s.get(LEGU_MARKET_PE_URL, params={'marketId': str(market_id), 'token': token},
-                  headers={'X-CSRF-Token': csrf,
-                           'Referer': 'https://www.legulegu.com/stockdata/a-ttm-lyr'},
-                  timeout=(2, 5))
-        rows = r.json().get('data') or []
-        out = []
-        for d in rows:
-            pe = d.get('averagePETTM')   # 整体法
-            if pe:
-                out.append({'day': str(d['date']), 'pe': float(pe)})
-        _log(f'legu market PE id={market_id}: {len(out)} 条')
-        return out
-    return _cached_series(f'legu_mkt_pe_{market_id}', fetch)
 
 
 def _fetch_y10(deadline=None):
@@ -541,24 +457,123 @@ def _fetch_index_pe_now(symbol):
     return pe
 
 
+def _pe_history_load():
+    """读累积库：{'000300': {'2019-01-03': 11.04, ...}, ...}"""
+    if not os.path.exists(PE_HISTORY_FILE):
+        return {}
+    try:
+        with open(PE_HISTORY_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def _pe_history_save(data):
+    try:
+        with open(PE_HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception as e:
+        _log(f'PE 累积库写入失败: {str(e)[:60]}')
+
+
+def _pe_history_merge(index_code, snapshot):
+    """把官方快照并入累积库。
+
+    snapshot: {'YYYY-MM-DD': {'pe1':..,'pe2':..}}
+    只增不减 —— 已存在的日期不覆盖。官方偶尔会微调历史值，
+    但那种修订幅度极小，保持原始记录反而更稳定。
+    """
+    db = _pe_history_load()
+    bucket = db.setdefault(index_code, {})
+    added = 0
+    for day, v in snapshot.items():
+        if day not in bucket:
+            bucket[day] = v
+            added += 1
+    if added:
+        _pe_history_save(db)
+        _log(f'中证 {index_code} PE 累积库 +{added} 天，累计 {len(bucket)} 天')
+    return bucket
+
+
+def _fetch_csindex_valuation_snapshot(index_code):
+    """中证官方每日估值文件（最近约 20 个交易日）。
+
+    URL 形如 .../indicator/000300indicator.xls
+    文件里明确给了两个 PE 口径：
+        市盈率1（总股本）P/E1
+        市盈率2（计算用股本）P/E2
+    还有对应的股息率 D/P1、D/P2。
+
+    这是目前找到的**唯一权威标注口径**的来源，用来给长历史序列定标。
+    返回 {'YYYY-MM-DD': {'pe1':x, 'pe2':y, 'dp1':.., 'dp2':..}}
+    """
+    import io
+    url = ('https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/'
+           f'file/autofile/indicator/{index_code}indicator.xls')
+    r = requests.get(url, timeout=(3, 20))
+    r.raise_for_status()
+    df = pd.read_excel(io.BytesIO(r.content), header=0)
+    cols = list(df.columns)
+    # 列顺序固定：日期、代码、中全称、中简称、英全称、英简称、P/E1、P/E2、D/P1、D/P2
+    out = {}
+    for _, row in df.iterrows():
+        try:
+            day = str(int(row[cols[0]]))
+            day = f'{day[:4]}-{day[4:6]}-{day[6:8]}'
+            out[day] = {
+                'pe1': float(row[cols[6]]),
+                'pe2': float(row[cols[7]]),
+                'dp1': float(row[cols[8]]),
+                'dp2': float(row[cols[9]]),
+            }
+        except Exception:
+            continue
+    return out
+
+
 def _fetch_csindex_pe(index_code, years=SPREAD_YEARS + 1):
-    """中证指数官网历史市盈率（日频、官方权威）。
+    """中证指数官网历史市盈率（日频）。
 
-    接口返回的 `peg` 字段为市盈率，但口径是"计算用股本"（加权），
-    比主流 App（腾讯/蛋卷，13.5 左右）低约 3 个百分点 —— 实测
-    000300 同日：中证 peg 13.14 vs 腾讯 13.52 vs 蛋卷 13.504。
+    重要：perf 接口返回的 `peg` 字段【不是 PE，是 PEG】(市盈率相对盈利增长比)。
+    判定依据：同一时期 PE1/PE2 几乎连续，而 peg 会跳变（如 12.61→13.16 一天 4.4%）。
 
-    股债收益差必须用**主流口径**才和别人对得上，因此这里做口径校正：
-    用腾讯当日 PE 与该序列当日 PE 的比值作为校正系数，整条序列乘上去，
-    使其当前值与主流口径对齐（历史相对形状保持不变）。
+    真正的 PE 有两个口径（官方估值文件明确标注）：
+        市盈率1（总股本）  —— 主流 App（腾讯/蛋卷）用的就是这个口径
+        市盈率2（计算用股本）—— 中证自己计算指数权重用的口径
+
+    官方估值文件只给最近 ~20 个交易日，拉不到十年历史。
+    所以策略是：
+      1. 拉 perf 接口的 peg 长序列（只拿来当「形状」，不用其绝对值）；
+      2. 拉官方估值文件拿 PE1 的真实值；
+      3. 用两者重叠日的 PE1/peg 比值中位数，把整条 peg 序列换算成 PE1 口径。
+
+    这样绝对水平锚在官方 PE1 上，历史相对形状来自连续序列。
     """
     start = (datetime.now() - timedelta(days=365 * years + 30)).strftime('%Y%m%d')
     end = datetime.now().strftime('%Y%m%d')
 
     def fetch():
+        # --- 1) 官方快照（PE1 真值），并并入累积库 ---
+        snap = {}
+        try:
+            snap = _cached_series(f'csindex_snap_{index_code}',
+                                  lambda: _fetch_csindex_valuation_snapshot(index_code),
+                                  ttl=6 * 3600, ttl_fail=1800)
+            _log(f'中证 {index_code} 估值快照 {len(snap)} 天')
+        except Exception as e:
+            _log(f'中证 {index_code} 估值快照失败(忽略): {str(e)[:80]}')
+
+        # 累积库：每天的官方 PE1 都存下来，长期自动形成完整历史
+        hist = {}
+        if snap:
+            try:
+                hist = _pe_history_merge(index_code, snap)
+            except Exception as e:
+                _log(f'PE 累积库合并失败: {str(e)[:60]}')
+
+        # --- 2) perf 长序列 ---
         last = None
-        # 中证官网会间歇返回 403 反爬页面（连续请求极易触发）。
-        # 退避重试 4 次，间隔递增 + 随机抖动，避开固定节奏的识别。
         import random
         for attempt in range(4):
             try:
@@ -578,26 +593,53 @@ def _fetch_csindex_pe(index_code, years=SPREAD_YEARS + 1):
                 rows = (r.json() or {}).get('data') or []
                 out = []
                 for d in rows:
-                    pe = d.get('peg')
-                    if pe and float(pe) > 0:
+                    v = d.get('peg')          # 注意：这是 PEG，仅用作形状
+                    if v and float(v) > 0:
                         day = d['tradeDate']
-                        out.append({'day': f'{day[:4]}-{day[4:6]}-{day[6:8]}', 'pe': float(pe)})
+                        out.append({'day': f'{day[:4]}-{day[4:6]}-{day[6:8]}',
+                                    'peg': float(v)})
                 if not out:
                     last = RuntimeError('中证接口返回空')
                     time.sleep(1.2)
                     continue
                 out.sort(key=lambda x: x['day'])
 
-                # 不做统一口径校正。
-                #
-                # 曾经用「今日 腾讯PE/中证PE」算一个固定系数(≈1.0289)乘到整条历史上，
-                # 目的是让今日差值对齐其他 App。但这个做法有个硬伤：
-                # 系数只是"今天"两家口径的比值，历史上这个比值是浮动的
-                # （甚至可能小于 1），套到十年前等于给每个点凭空加约 0.2pp 偏移，
-                # 会把 2019 年初那种历史峰值压平。
-                #
-                # 中证官网的 peg 序列内部口径自洽，做分位/分档这种"相对比较"
-                # 恰恰应该用同一条自洽序列 —— 所以这里保留原始值。
+                # --- 3) 用重叠日比值把 peg 换算成 PE1 ---
+                # 定标样本优先用累积库（历史越长，中位数越稳），
+                # 累积库还没有时退回今天的官方快照。
+                calib = hist or {}
+                if not calib:
+                    calib = {d: v for d, v in snap.items()}
+                ratios = []
+                for p in out:
+                    s = calib.get(p['day'])
+                    if s and s.get('pe1') and p['peg']:
+                        ratios.append(s['pe1'] / p['peg'])
+                if ratios:
+                    ratios.sort()
+                    k = ratios[len(ratios) // 2]        # 中位数，抗单日异常
+                    for p in out:
+                        p['pe'] = round(p['peg'] * k, 4)
+                        p.pop('peg', None)
+                    _log(f'中证 {index_code} peg→PE1 换算系数 ×{k:.4f}'
+                         f'（{len(ratios)} 个定标日，中位数）')
+
+                    # 累积库里已有的日期，直接用官方 PE1 覆盖（比换算值更准）
+                    exact = 0
+                    for p in out:
+                        h = calib.get(p['day'])
+                        if h and h.get('pe1'):
+                            p['pe'] = round(h['pe1'], 4)
+                            exact += 1
+                    if exact:
+                        _log(f'中证 {index_code} 其中 {exact} 天直接用官方 PE1')
+                else:
+                    # 拿不到任何官方定标：退回 peg 原值，并标记
+                    for p in out:
+                        p['pe'] = p.pop('peg')
+                        p['estimated'] = True
+                    _log(f'中证 {index_code} 无官方定标，退回 peg 原值（口径可能偏低）')
+
                 _log(f'中证 {index_code} PE {len(out)} 条 ({out[0]["day"]}~{out[-1]["day"]})')
                 return out
             except Exception as e:
@@ -667,22 +709,20 @@ def build_spread():
             cs_code = '000300' if key == 'hs300' else '000985'
             pe_series, source = None, None
 
-            # 主路径：中证官网官方日频PE
+            # 主路径：中证官方 PE1（总股本）累积库 + peg 序列补形状。
+            #
+            # 为什么这么绕：官方估值文件只发布最近 20 个交易日，
+            # 但每天抓一次并存进累积库，历史就会自己长出来。
+            # 累积不够时，用 perf 接口的 peg 序列当"形状"、用累积库里
+            # 官方 PE1 与同日 peg 的比值做锚定，把整条序列拉到 PE1 口径。
             try:
                 pe_series = _fetch_csindex_pe(cs_code)
-                source = '中证指数官网'
+                n_hist = len(_pe_history_load().get(cs_code, {}))
+                source = f'中证官方 PE1（累积 {n_hist} 天定标）' if n_hist >= 5 else '中证指数官网'
             except Exception as e:
                 errors.append(f'{name} 中证失败: {str(e)[:50]}')
 
-            # 备用1：乐咕（其 index-basic-pe 为月频，密度低，仅在无日频时使用）
-            if not pe_series and time.time() < deadline:
-                try:
-                    pe_series = _fetch_legu_index_pe(f'{cs_code}.SH', deadline=deadline)
-                    source = '乐咕乐股（月频）'
-                except Exception:
-                    pass
-
-            # 备用2：腾讯实时PE + 价格推算（保证图不空）
+            # 备用：腾讯实时PE + 价格推算（保证图不空）
             if not pe_series:
                 try:
                     pe_series = _build_pe_from_price(symbol, name)
