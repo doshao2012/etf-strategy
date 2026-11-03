@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import {
-  ComposedChart, LineChart, Line, Area, XAxis, YAxis, CartesianGrid,
+  ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from 'recharts';
 import type { CybDividendResponse, CybDividendPoint, SpreadOption, SpreadBand } from '@/lib/api';
@@ -211,6 +211,10 @@ export default function CybDividendCard({ data }: { data: Data }) {
   const curBand: SpreadBand = (curPoint?.band as SpreadBand) || 'deepblue';
   const curBandStyle = SPREAD_BAND_STYLE[curBand];
   const curStats = spreadView?.stats;
+
+  // 分位阈值：必须给默认值 —— ReferenceArea/ReferenceLine 要直接挂在 ComposedChart 下，
+  // 不能放在 {cond && ...} 里（否则 recharts 会丢弃整块）。
+  const thr = spreadView?.thresholds ?? { p10: 0, p30: 0, p70: 0, p90: 0 };
 
   return (
     <Card className="mb-3 bg-white border border-slate-200 shadow-sm">
@@ -513,7 +517,10 @@ export default function CybDividendCard({ data }: { data: Data }) {
 
             <div className="h-[250px] w-full -ml-2">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={bandedPtsSmooth} margin={{ top: 6, right: 8, bottom: 0, left: 0 }}>
+                {/* 必须用 ComposedChart：LineChart 只认 <Line>，会忽略
+                    ReferenceArea / ReferenceLine，导致分档色带和 4 条分位虚线全都不渲染。
+                    上面那张比值图用的就是 ComposedChart，所以它的阈值线一直正常。 */}
+                <ComposedChart data={bandedPtsSmooth} margin={{ top: 6, right: 8, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
                   <XAxis
                     dataKey="day"
@@ -547,47 +554,24 @@ export default function CybDividendCard({ data }: { data: Data }) {
                     }}
                   />
 
-                  {/* 分位档背景：纵向就是分位从低到高（下→上 = 贵→便宜） */}
-                  {spreadView?.thresholds && (() => {
-                    const t = spreadView.thresholds!;
-                    return (
-                      <>
-                        {/* 底部：分位 0~10%，差值最低 → 最贵 */}
-                        <ReferenceArea y1={spreadYDomain[0]} y2={t.p10} fill={SPREAD_BAND_STYLE.red.area} />
-                        <ReferenceArea y1={t.p10} y2={t.p30} fill={SPREAD_BAND_STYLE.yellow.area} />
-                        <ReferenceArea y1={t.p30} y2={t.p70} fill={SPREAD_BAND_STYLE.deepblue.area} />
-                        <ReferenceArea y1={t.p70} y2={t.p90} fill={SPREAD_BAND_STYLE.skyblue.area} />
-                        {/* 顶部：分位 90~100%，差值最高 → 最便宜 */}
-                        <ReferenceArea y1={t.p90} y2={spreadYDomain[1]} fill={SPREAD_BAND_STYLE.green.area} />
-                      </>
-                    );
-                  })()}
+                  {/* 分位档背景色带（下→上 = 贵→便宜）。
+                      写法必须平铺：recharts 只认 ComposedChart 的直接子元素，
+                      用 IIFE + Fragment 包裹会被当成非法子节点丢弃（4 条线曾因此完全不显示）。 */}
+                  <ReferenceArea y1={spreadYDomain[0]} y2={thr.p10} fill={SPREAD_BAND_STYLE.red.area} />
+                  <ReferenceArea y1={thr.p10} y2={thr.p30} fill={SPREAD_BAND_STYLE.yellow.area} />
+                  <ReferenceArea y1={thr.p30} y2={thr.p70} fill={SPREAD_BAND_STYLE.deepblue.area} />
+                  <ReferenceArea y1={thr.p70} y2={thr.p90} fill={SPREAD_BAND_STYLE.skyblue.area} />
+                  <ReferenceArea y1={thr.p90} y2={spreadYDomain[1]} fill={SPREAD_BAND_STYLE.green.area} />
 
-                  {/* 四条分档分割线：p10 / p30 / p70 / p90，把图切成 5 个色带 */}
-                  {spreadView?.thresholds && (() => {
-                    const t = spreadView.thresholds!;
-                    const marks: Array<{ y: number; label: string; color: string; pos: 'insideBottomLeft' | 'insideTopLeft' }> = [
-                      { y: t.p10, label: `10% 分位 ${t.p10}`, color: SPREAD_BAND_STYLE.red.color, pos: 'insideBottomLeft' },
-                      { y: t.p30, label: `30% 分位 ${t.p30}`, color: SPREAD_BAND_STYLE.yellow.color, pos: 'insideTopLeft' },
-                      { y: t.p70, label: `70% 分位 ${t.p70}`, color: SPREAD_BAND_STYLE.deepblue.color, pos: 'insideBottomLeft' },
-                      { y: t.p90, label: `90% 分位 ${t.p90}`, color: SPREAD_BAND_STYLE.skyblue.color, pos: 'insideTopLeft' },
-                    ];
-                    return (
-                      <>
-                        {marks.map((m) => (
-                          <ReferenceLine
-                            key={m.label}
-                            y={m.y}
-                            stroke={m.color}
-                            strokeDasharray="5 3"
-                            strokeWidth={1}
-                            strokeOpacity={0.75}
-                            label={{ value: m.label, position: m.pos, fontSize: 10, fill: m.color }}
-                          />
-                        ))}
-                      </>
-                    );
-                  })()}
+                  {/* 四条分位分割线：p10 红 / p30 黄 / p70 蓝 / p90 天蓝 */}
+                  <ReferenceLine y={thr.p10} stroke={SPREAD_BAND_STYLE.red.color} strokeDasharray="5 3" strokeWidth={1} strokeOpacity={0.8}
+                    label={{ value: `10% 分位 ${thr.p10.toFixed(2)}`, position: 'insideBottomLeft', fontSize: 10, fill: SPREAD_BAND_STYLE.red.color }} />
+                  <ReferenceLine y={thr.p30} stroke={SPREAD_BAND_STYLE.yellow.color} strokeDasharray="5 3" strokeWidth={1} strokeOpacity={0.8}
+                    label={{ value: `30% 分位 ${thr.p30.toFixed(2)}`, position: 'insideTopLeft', fontSize: 10, fill: SPREAD_BAND_STYLE.yellow.color }} />
+                  <ReferenceLine y={thr.p70} stroke={SPREAD_BAND_STYLE.deepblue.color} strokeDasharray="5 3" strokeWidth={1} strokeOpacity={0.8}
+                    label={{ value: `70% 分位 ${thr.p70.toFixed(2)}`, position: 'insideBottomLeft', fontSize: 10, fill: SPREAD_BAND_STYLE.deepblue.color }} />
+                  <ReferenceLine y={thr.p90} stroke={SPREAD_BAND_STYLE.skyblue.color} strokeDasharray="5 3" strokeWidth={1} strokeOpacity={0.8}
+                    label={{ value: `90% 分位 ${thr.p90.toFixed(2)}`, position: 'insideTopLeft', fontSize: 10, fill: SPREAD_BAND_STYLE.skyblue.color }} />
                   <ReferenceLine y={0} stroke="#cbd5e1" strokeWidth={1} />
 
                   {/* 五条分档线，各自只画自己那一段 */}
@@ -603,7 +587,7 @@ export default function CybDividendCard({ data }: { data: Data }) {
                       connectNulls={false}
                     />
                   ))}
-                </LineChart>
+                </ComposedChart>
               </ResponsiveContainer>
             </div>
 
