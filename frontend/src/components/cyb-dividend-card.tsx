@@ -6,7 +6,7 @@ import {
   ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea,
 } from 'recharts';
-import type { CybDividendResponse } from '@/lib/api';
+import type { CybDividendResponse, CybDividendPoint } from '@/lib/api';
 
 type Data = CybDividendResponse['data'];
 
@@ -53,6 +53,45 @@ export default function CybDividendCard({ data }: { data: Data }) {
     });
     return ticks;
   }, [shown]);
+
+  // 叠加显示：可勾选叠加创业板指 / 中证红利。
+  // 两个指数与比值量级差太大（2400 vs 0.43），直接同轴画不了，
+  // 统一做「区间起点归一化到 100」——顺带能直观对比三者强弱。
+  const [overlay, setOverlay] = useState<{ growth: boolean; dividend: boolean }>({ growth: false, dividend: false });
+
+  type NormPoint = CybDividendPoint & { growthIdx: number; dividendIdx: number; ratioRaw: number; ratioBase: number };
+
+  const shownNorm = useMemo<NormPoint[]>(() => {
+    if (!shown.length) return [];
+    const baseG = shown[0].growth || 1;
+    const baseD = shown[0].dividend || 1;
+    const baseR = shown[0].ratio || 1;
+    return shown.map((p) => ({
+      ...p,
+      // 比值保持原始量级（左轴），指数归一化到 100（右轴）
+      growthIdx: Number((p.growth / baseG * 100).toFixed(2)),
+      dividendIdx: Number((p.dividend / baseD * 100).toFixed(2)),
+      ratioRaw: p.ratio,
+      ratioBase: baseR,
+    }));
+  }, [shown]);
+
+  const toggleOverlay = (key: 'growth' | 'dividend') =>
+    setOverlay((o) => ({ ...o, [key]: !o[key] }));
+
+  const hasOverlay = overlay.growth || overlay.dividend;
+
+  // 右轴（归一化指数）范围
+  const rightDomain = useMemo(() => {
+    const vals: number[] = [];
+    if (overlay.growth) shownNorm.forEach((p) => vals.push(p.growthIdx));
+    if (overlay.dividend) shownNorm.forEach((p) => vals.push(p.dividendIdx));
+    if (!vals.length) return undefined;
+    const lo = Math.min(...vals);
+    const hi = Math.max(...vals);
+    const pad = Math.max((hi - lo) * 0.08, 1);
+    return [Number((lo - pad).toFixed(1)), Number((hi + pad).toFixed(1))] as [number, number];
+  }, [shownNorm, overlay]);
 
   const yDomain = useMemo(() => {
     if (!shown.length) return [0.25, 0.75] as [number, number];
@@ -135,6 +174,26 @@ export default function CybDividendCard({ data }: { data: Data }) {
               比值走势（{shown[0]?.day} ~ {shown[shown.length - 1]?.day}，{shown.length} 个交易日）
             </span>
             <div className="flex items-center gap-1">
+              {/* 叠加开关 */}
+              <button
+                onClick={() => toggleOverlay('growth')}
+                className={`px-2 py-0.5 text-xs rounded transition-colors ${
+                  overlay.growth ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                }`}
+                title="叠加创业板指（归一化到100，右轴）"
+              >
+                {overlay.growth ? '✓ ' : '+ '}创业板指
+              </button>
+              <button
+                onClick={() => toggleOverlay('dividend')}
+                className={`px-2 py-0.5 text-xs rounded transition-colors ${
+                  overlay.dividend ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                }`}
+                title="叠加中证红利（归一化到100，右轴）"
+              >
+                {overlay.dividend ? '✓ ' : '+ '}中证红利
+              </button>
+              <span className="w-px h-4 bg-slate-200 mx-0.5" />
               {(['1y', '3y', '5y'] as const).map((r) => (
                 <button
                   key={r}
@@ -151,7 +210,7 @@ export default function CybDividendCard({ data }: { data: Data }) {
 
           <div className="h-[300px] w-full -ml-2">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={shown} margin={{ top: 6, right: 8, bottom: 0, left: 0 }}>
+              <ComposedChart data={shownNorm} margin={{ top: 6, right: hasOverlay ? 8 : 8, bottom: 0, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
                 {/* 阈值背景带：越冷越蓝，越热越红 */}
                 <ReferenceArea y1={yDomain[0]} y2={lines.sweepBottom} fill={STATE_STYLE['抄底'].band} />
@@ -183,6 +242,8 @@ export default function CybDividendCard({ data }: { data: Data }) {
                   labelFormatter={(l: string) => l}
                   formatter={(value: any, name: any) => {
                     if (name === 'ratio') return [Number(value).toFixed(4), '比值'];
+                    if (name === 'growthIdx') return [Number(value).toFixed(1), `${growth.name}（起点=100）`];
+                    if (name === 'dividendIdx') return [Number(value).toFixed(1), `${dividend.name}（起点=100）`];
                     return [value, name];
                   }}
                 />
@@ -207,6 +268,30 @@ export default function CybDividendCard({ data }: { data: Data }) {
                   </linearGradient>
                 </defs>
                 <Line type="monotone" dataKey="ratio" stroke="#1e293b" strokeWidth={1.6} dot={false} isAnimationActive={false} />
+
+                {/* 叠加线：归一化指数，走右轴 */}
+                {hasOverlay && (
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    domain={rightDomain}
+                    tick={{ fontSize: 10, fill: '#94a3b8' }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={40}
+                    tickFormatter={(v: number) => v.toFixed(0)}
+                  />
+                )}
+                {overlay.growth && (
+                  <Line yAxisId={hasOverlay ? 'right' : undefined} type="monotone"
+                    dataKey="growthIdx" stroke="#f97316" strokeWidth={1.2} strokeDasharray="1 0"
+                    dot={false} isAnimationActive={false} opacity={0.85} />
+                )}
+                {overlay.dividend && (
+                  <Line yAxisId={hasOverlay ? 'right' : undefined} type="monotone"
+                    dataKey="dividendIdx" stroke="#059669" strokeWidth={1.2} strokeDasharray="1 0"
+                    dot={false} isAnimationActive={false} opacity={0.85} />
+                )}
               </ComposedChart>
             </ResponsiveContainer>
           </div>
