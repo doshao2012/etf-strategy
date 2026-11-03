@@ -245,6 +245,8 @@ export interface SpreadData {
   options: SpreadOption[];
   default: string;
   years: number;
+  /** 数据源不可用时的原因（此时 options 为空） */
+  error?: string;
 }
 
 export interface CybDividendResponse {

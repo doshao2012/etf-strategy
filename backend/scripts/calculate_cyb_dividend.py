@@ -328,63 +328,98 @@ def _merge_cache(key, value):
     _cache_save(cache)
 
 
-def _cached_series(key, fetcher, ttl=CACHE_TTL):
-    """带 TTL 与"过期兜底"的序列缓存：拉取失败永远回退到旧数据。"""
+def _cached_series(key, fetcher, ttl=CACHE_TTL, ttl_fail=1800):
+    """带缓存的序列获取：
+    - 成功 → 缓存 ttl（默认24h）
+    - 失败 → 缓存错误信息 ttl_fail（默认30min），期内直接快速失败，
+      不再每次请求都重试外网（否则源站不可达时每次都拖满超时）
+    - 有旧成功数据时永远优先返回旧数据（stale-ok）
+    """
     cache = _cache_load()
     entry = cache.get(key) or {}
     age = time.time() - (entry.get('fetchedAt') or 0)
     if entry.get('data') and age < ttl:
         _log(f'{key} 命中缓存（{age/3600:.1f}h 前，{len(entry["data"])} 条）')
         return entry['data']
+
+    fail = entry.get('fail') or {}
+    fail_age = time.time() - (fail.get('at') or 0)
+    if fail and fail_age < ttl_fail and not entry.get('data'):
+        raise RuntimeError(f'{fail.get("error", "上次失败")}（{fail_age/60:.0f} 分钟内不再重试）')
+
     try:
         data = fetcher()
         if data:
             _merge_cache(key, {'fetchedAt': time.time(), 'data': data})
             return data
+        raise RuntimeError('返回数据为空')
     except Exception as e:
         _log(f'{key} 拉取失败: {e}')
-    if entry.get('data'):
-        _log(f'{key} 使用过期缓存兜底（{age/3600:.0f}h 前）')
-        return entry['data']
-    return []
+        # 记录失败时间；若已有旧数据则旧数据继续可用（不受失败标记影响）
+        merged = dict(entry)
+        merged['fail'] = {'at': time.time(), 'error': str(e)[:200]}
+        if merged.get('data'):
+            _merge_cache(key, merged)
+            _log(f'{key} 使用过期缓存兜底（{age/3600:.0f}h 前）')
+            return merged['data']
+        else:
+            cache2 = _cache_load()
+            cache2[key] = merged
+            _cache_save(cache2)
+            raise
 
 
 def _legu_session(deadline):
-    """乐咕需要先访问页面拿 _csrf，再带 token 调 API。站点偶发限流，多重试。
-    deadline: 时间戳，超过即放弃（防止拖死整个接口）。"""
+    """乐咕需要先访问页面拿 _csrf，再带 token 调 API。站点常限流，快速失败即可。
+    最多尝试 2 次、总计不超过 min(deadline, 3s)。"""
     s = requests.Session()
     s.headers.update({'User-Agent': 'Mozilla/5.0'})
     csrf = None
-    while time.time() < deadline:
+    hard_stop = min(deadline, time.time() + 3)
+    for _ in range(2):
+        if time.time() >= hard_stop:
+            break
         try:
-            r = s.get(LEGU_TOKEN_URL, timeout=(2, 4))
+            r = s.get(LEGU_TOKEN_URL, timeout=(1.5, 2.5))
             m = re.search(r'name="_csrf"\s+content="([^"]+)"', r.text)
             if m:
                 csrf = m.group(1)
                 break
         except Exception as e:
-            _log(f'csrf 失败: {e}')
-        time.sleep(1)
+            _log(f'csrf 失败: {str(e)[:60]}')
     if not csrf:
-        raise RuntimeError('legulegu csrf 获取失败（站点不可达）')
+        raise RuntimeError('乐咕站点不可达/限流')
     token = hashlib.md5(date.today().isoformat().encode()).hexdigest()
     return s, csrf, token
+
+
+def _legu_get_pe(index_code, deadline):
+    """取单个指数 PE。复用同一 csrf，失败重试 1 次（限流是随机的）。"""
+    last = None
+    for _ in range(2):
+        if time.time() >= deadline:
+            break
+        try:
+            s, csrf, token = _legu_session(deadline)
+            r = s.get(LEGU_PE_URL, params={'token': token, 'indexCode': index_code},
+                      headers={'X-CSRF-Token': csrf}, timeout=(2, 6))
+            rows = r.json().get('data') or []
+            out = [{'day': d['date'], 'pe': float(d['ttmPe'])} for d in rows if d.get('ttmPe')]
+            if out:
+                _log(f'legu PE {index_code}: {len(out)} 条')
+                return out
+            last = RuntimeError('返回空')
+        except Exception as e:
+            last = e
+            _log(f'legu PE {index_code} 尝试失败: {str(e)[:60]}')
+        time.sleep(1.2)
+    raise last or RuntimeError('PE 获取失败')
 
 
 def _fetch_legu_index_pe(index_code, deadline=None):
     """沪深300 等指数的 PE 历史（月频）。返回 [{day, pe}]，pe 为整体法 TTM。"""
     def fetch():
-        s, csrf, token = _legu_session(deadline or (time.time() + 10))
-        r = s.get(LEGU_PE_URL, params={'token': token, 'indexCode': index_code},
-                  headers={'X-CSRF-Token': csrf}, timeout=(2, 5))
-        rows = r.json().get('data') or []
-        out = []
-        for d in rows:
-            pe = d.get('ttmPe')
-            if pe:
-                out.append({'day': d['date'], 'pe': float(pe)})
-        _log(f'legu PE {index_code}: {len(out)} 条')
-        return out
+        return _legu_get_pe(index_code, deadline or (time.time() + 10))
     return _cached_series(f'legu_pe_{index_code}', fetch)
 
 
@@ -395,18 +430,20 @@ def _fetch_legu_market_pe(market_id, deadline=None):
         s = requests.Session()
         s.headers.update({'User-Agent': 'Mozilla/5.0'})
         csrf = None
-        while time.time() < dl:
+        hard_stop = min(dl, time.time() + 3)
+        for _ in range(2):
+            if time.time() >= hard_stop:
+                break
             try:
-                r = s.get('https://www.legulegu.com/stockdata/a-ttm-lyr', timeout=(2, 4))
+                r = s.get('https://www.legulegu.com/stockdata/a-ttm-lyr', timeout=(1.5, 2.5))
                 m = re.search(r'name="_csrf"\s+content="([^"]+)"', r.text)
                 if m:
                     csrf = m.group(1)
                     break
             except Exception:
                 pass
-            time.sleep(1)
         if not csrf:
-            raise RuntimeError('legulegu csrf 获取失败（站点不可达）')
+            raise RuntimeError('乐咕站点不可达/限流')
         token = hashlib.md5(date.today().isoformat().encode()).hexdigest()
         r = s.get(LEGU_MARKET_PE_URL, params={'marketId': str(market_id), 'token': token},
                   headers={'X-CSRF-Token': csrf,
@@ -490,7 +527,7 @@ def build_spread():
     t0 = time.time()
 
     def fetch_all():
-        deadline = time.time() + 12
+        deadline = time.time() + 8
         y10 = _fetch_y10(deadline=deadline)
         if not y10:
             raise RuntimeError('10Y国债数据不可用')
@@ -498,18 +535,29 @@ def build_spread():
         cutoff = (datetime.now() - timedelta(days=365 * SPREAD_YEARS)).strftime('%Y-%m-%d')
 
         options = []
-        if time.time() < deadline + 3:   # 宽限 3s
-            pe300 = _fetch_legu_index_pe('000300.SH', deadline=deadline)
-            pts300 = _merge_pe_yield([p for p in pe300 if p['day'] >= cutoff], y10_map)
-            if pts300:
-                options.append(_spread_option('hs300', '沪深300', pts300))
-        if time.time() < deadline + 3:
-            mkt = _fetch_legu_market_pe(5, deadline=deadline)
-            ptsall = _merge_pe_yield([p for p in mkt if p['day'] >= cutoff], y10_map)
-            if ptsall:
-                options.append(_spread_option('allA', '全部A股', ptsall))
+        errors = []
+        if time.time() < deadline + 2:
+            try:
+                pe300 = _fetch_legu_index_pe('000300.SH', deadline=deadline)
+                pts300 = _merge_pe_yield([p for p in pe300 if p['day'] >= cutoff], y10_map)
+                if pts300:
+                    options.append(_spread_option('hs300', '沪深300', pts300))
+                else:
+                    errors.append('沪深300 PE为空')
+            except Exception as e:
+                errors.append(f'沪深300: {e}')
+        if time.time() < deadline + 2:
+            try:
+                mkt = _fetch_legu_market_pe(5, deadline=deadline)
+                ptsall = _merge_pe_yield([p for p in mkt if p['day'] >= cutoff], y10_map)
+                if ptsall:
+                    options.append(_spread_option('allA', '全部A股', ptsall))
+                else:
+                    errors.append('全部A股 PE为空')
+            except Exception as e:
+                errors.append(f'全部A股: {e}')
         if not options:
-            raise RuntimeError('没有任何股债收益差数据')
+            raise RuntimeError('；'.join(errors) or '没有任何股债收益差数据')
         _log(f'股债收益差构建 {time.time()-t0:.2f}s，options={[(o["key"], len(o["points"])) for o in options]}')
         return {
             'definition': '盈利收益率(1/PE) − 10年期国债收益率',
@@ -518,7 +566,12 @@ def build_spread():
             'years': SPREAD_YEARS,
         }
 
-    return _cached_series('spread_built', fetch_all, ttl=12 * 3600)
+    try:
+        return _cached_series('spread_built', fetch_all, ttl=12 * 3600)
+    except Exception as e:
+        # 失败也要把原因带回去，方便线上排查是哪个源不通
+        return {'error': str(e)[:300], 'definition': '盈利收益率(1/PE) − 10年期国债收益率',
+                'options': [], 'default': 'hs300', 'years': SPREAD_YEARS}
 
 
 def _spread_option(key, name, points):

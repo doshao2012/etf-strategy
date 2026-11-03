@@ -325,7 +325,27 @@ export default function CybDividendCard({ data }: { data: Data }) {
           </div>
         </div>
 
-        {/* 股债收益差 */}
+        {/* 股债收益差：数据源不可用时明确提示，而不是静默消失 */}
+        {spread && !spreadOption && (
+          <div className="mb-4 pt-3 border-t border-slate-100">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium text-slate-600">
+                股债收益差（{spread.definition}，近 {spread.years} 年）
+              </span>
+            </div>
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-xs text-amber-700 font-medium mb-1">股债收益差数据暂时拿不到</p>
+              <p className="text-[11px] text-amber-600 leading-relaxed">
+                数据源（乐咕乐股 / 东方财富）在当前服务器网络下不可达或超时。
+                上方比值部分不受影响，可正常使用。
+              </p>
+              {spread.error && (
+                <p className="text-[11px] text-amber-500 mt-1 break-all">诊断：{spread.error}</p>
+              )}
+            </div>
+          </div>
+        )}
+
         {spread && spreadOption && (
           <div className="mb-4 pt-3 border-t border-slate-100">
             <div className="flex items-center justify-between mb-1">
