@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { getETFStrategy, getOversoldStrategy, getMeanReversionStrategy, getMa200TrendStrategy, getEtfConfigs, updateEtfConfig, createEtfConfig, deleteEtfConfig, type EtfConfig, type MeanReversionETF, type MeanReversionResponse, type Ma200TrendResponse } from '@/lib/api';
+import { getETFStrategy, getOversoldStrategy, getMeanReversionStrategy, getMa200TrendStrategy, getCybDividendStrategy, getEtfConfigs, updateEtfConfig, createEtfConfig, deleteEtfConfig, type EtfConfig, type MeanReversionETF, type MeanReversionResponse, type Ma200TrendResponse, type CybDividendResponse } from '@/lib/api';
 import Ma200TrendCard from '@/components/ma200-trend-card';
+import CybDividendCard from '@/components/cyb-dividend-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -13,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { RefreshCw, Settings, Plus, Pencil, Trash2, Shield } from 'lucide-react';
 
-type StrategyType = 'rotation' | 'oversold' | 'meanReversion' | 'ma200Trend';
+type StrategyType = 'rotation' | 'oversold' | 'meanReversion' | 'ma200Trend' | 'cybDividend';
 
 // 趋势轮动ETF数据
 interface DailySnapshot {
@@ -730,6 +731,7 @@ export default function ETFRotationPage() {
   const [oversoldData, setOversoldData] = useState<OversoldResponse | null>(null);
   const [meanReversionData, setMeanReversionData] = useState<MeanReversionResponse | null>(null);
   const [ma200TrendData, setMa200TrendData] = useState<Ma200TrendResponse | null>(null);
+  const [cybDividendData, setCybDividendData] = useState<CybDividendResponse | null>(null);
   const [configs, setConfigs] = useState<EtfConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -775,9 +777,12 @@ export default function ETFRotationPage() {
       } else if (strategyAtRequest === 'meanReversion') {
         const mr = await getMeanReversionStrategy();
         if (!isStale()) setMeanReversionData(mr as MeanReversionResponse);
-      } else {
+      } else if (strategyAtRequest === 'ma200Trend') {
         const trend = await getMa200TrendStrategy();
         if (!isStale()) setMa200TrendData(trend as Ma200TrendResponse);
+      } else {
+        const cyb = await getCybDividendStrategy();
+        if (!isStale()) setCybDividendData(cyb as CybDividendResponse);
       }
       if (!isStale()) setLastUpdate(new Date().toLocaleTimeString('zh-CN'));
       if (!isStale()) setReadyStrategy(strategyAtRequest);  // 数据与策略绑定，成功后标记就绪
@@ -807,18 +812,20 @@ export default function ETFRotationPage() {
   const isOversoldMode = currentStrategy === 'oversold';
   const isMeanReversionMode = currentStrategy === 'meanReversion';
   const isMa200TrendMode = currentStrategy === 'ma200Trend';
+  const isCybDividendMode = currentStrategy === 'cybDividend';
 
   // 数据就绪性：readyStrategy 必须与当前策略一致，否则视为未就绪。
   // 这样切回任何策略都不会复用到上一轮的旧对象（残留的根因）。
   const isReady = readyStrategy === currentStrategy;
 
   // 按策略绑定的数据视图：未就绪时一律为 null，渲染层拿不到旧数据。
-  const rotationView = isReady && !isMa200TrendMode && !isMeanReversionMode && !isOversoldMode ? rotationData : null;
+  const rotationView = isReady && !isMa200TrendMode && !isMeanReversionMode && !isOversoldMode && !isCybDividendMode ? rotationData : null;
   const oversoldView = isReady && isOversoldMode ? oversoldData : null;
   const meanReversionView = isReady && isMeanReversionMode ? meanReversionData : null;
   const ma200TrendView = isReady && isMa200TrendMode ? ma200TrendData : null;
+  const cybDividendView = isReady && isCybDividendMode ? cybDividendData : null;
 
-  const currentData = ma200TrendView || meanReversionView || oversoldView || rotationView;
+  const currentData = cybDividendView || ma200TrendView || meanReversionView || oversoldView || rotationView;
 
   // 当前策略数据尚未就绪时，一律显示骨架屏（即使 loading 已为 false）
   const showSkeleton = loading || !isReady || !currentData;
@@ -832,7 +839,7 @@ export default function ETFRotationPage() {
             <div>
               <h1 className="text-xl font-bold text-slate-800">ETF轮动策略</h1>
               <p className="text-xs text-slate-400">
-                {isMa200TrendMode ? '美股MA200趋势' : isMeanReversionMode ? '均值回归' : isOversoldMode ? '超跌策略' : '趋势轮动'}
+                {isCybDividendMode ? '创业红利轮动' : isMa200TrendMode ? '美股MA200趋势' : isMeanReversionMode ? '均值回归' : isOversoldMode ? '超跌策略' : '趋势轮动'}
               </p>
             </div>
             
@@ -846,6 +853,7 @@ export default function ETFRotationPage() {
                   <SelectItem value="meanReversion">均值回归</SelectItem>
                   <SelectItem value="oversold">超跌策略</SelectItem>
                   <SelectItem value="ma200Trend">美股MA200</SelectItem>
+                  <SelectItem value="cybDividend">创业红利轮动</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -926,6 +934,32 @@ export default function ETFRotationPage() {
                         );
                       })()}
                     </div>
+                  ) : isCybDividendMode ? (
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-5 h-5 text-emerald-500" />
+                      <span className="text-sm font-medium text-slate-700">
+                        当前状态
+                      </span>
+                      <span className={`text-sm font-bold ${
+                        cybDividendView?.data.state === '逃顶' || cybDividendView?.data.state === '警戒'
+                          ? 'text-orange-600'
+                          : cybDividendView?.data.state === '抄底' || cybDividendView?.data.state === '机会'
+                          ? 'text-blue-600'
+                          : 'text-slate-600'
+                      }`}>
+                        {cybDividendView?.data.state || '-'}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        比值 {cybDividendView?.data.ratio?.toFixed(4) ?? '-'}
+                      </span>
+                      <span className={`text-xs font-medium ${
+                        (cybDividendView?.data.growth.changePct ?? 0) >= 0 ? 'text-red-500' : 'text-emerald-500'
+                      }`}>
+                        创业板 {cybDividendView?.data.growth.changePct != null
+                          ? `${cybDividendView.data.growth.changePct >= 0 ? '+' : ''}${cybDividendView.data.growth.changePct.toFixed(2)}%`
+                          : '-'}
+                      </span>
+                    </div>
                   ) : (
                     <div className="flex items-center gap-2">
                       <Shield className="w-5 h-5 text-emerald-500" />
@@ -975,6 +1009,40 @@ export default function ETFRotationPage() {
                       <span className="font-medium text-slate-600">注意 1.06~1.14 是「滞回带」：区间内不产生任何交易，持什么就继续持什么。</span>
                       <br />
                       同样一个 ratio 落在区间里，空仓者会买 TQQQ，持 QQQ 者却仍持 QQQ —— 结果只取决于你上一交易日拿着什么。
+                    </p>
+                  </div>
+                ) : isCybDividendMode ? (
+                  <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1">
+                    <p className="font-medium text-slate-700 mb-1">操作规则：只看一个数 比值 = 创业板指(399006) / 中证红利(000922)</p>
+                    <div className="grid grid-cols-6 gap-1.5">
+                      <div className="bg-blue-50 rounded p-2">
+                        <p className="font-medium text-blue-700 text-xs">&lt; 0.30</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">抄底<br/>重仓创业板</p>
+                      </div>
+                      <div className="bg-sky-50 rounded p-2">
+                        <p className="font-medium text-sky-600 text-xs">0.30~0.35</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">机会<br/>分批买入</p>
+                      </div>
+                      <div className="bg-cyan-50 rounded p-2">
+                        <p className="font-medium text-cyan-600 text-xs">0.35~0.40</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">观察<br/>等待信号</p>
+                      </div>
+                      <div className="bg-slate-100 rounded p-2">
+                        <p className="font-medium text-slate-600 text-xs">0.40~0.65</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">中性<br/>不操作</p>
+                      </div>
+                      <div className="bg-orange-50 rounded p-2">
+                        <p className="font-medium text-orange-600 text-xs">0.65~0.70</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">警戒<br/>减仓成长</p>
+                      </div>
+                      <div className="bg-red-50 rounded p-2">
+                        <p className="font-medium text-red-600 text-xs">&gt; 0.70</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">逃顶<br/>清仓成长</p>
+                      </div>
+                    </div>
+                    <p className="text-slate-500 text-[11px] pt-1.5 leading-relaxed">
+                      <span className="font-medium text-slate-600">比值是市场风险偏好的温度计：</span>
+                      创业板代表高估值成长，中证红利代表低估值高股息。比值越低说明成长被杀得越狠（潜在底部），越高说明成长越泡沫化（潜在顶部）。
                     </p>
                   </div>
                 ) : isMeanReversionMode ? (
@@ -1042,6 +1110,8 @@ export default function ETFRotationPage() {
               <h2 className="text-sm font-medium text-slate-500 mb-3">
                 {isMa200TrendMode
                   ? '美股 QQQ / TQQQ'
+                  : isCybDividendMode
+                  ? '创业板指 / 中证红利'
                   : isMeanReversionMode
                   ? `均值回归 (${meanReversionView?.data?.etfs?.length ?? 0})`
                   : isOversoldMode 
@@ -1052,6 +1122,14 @@ export default function ETFRotationPage() {
               {isMa200TrendMode ? (
                 ma200TrendView?.data ? (
                   <Ma200TrendCard data={ma200TrendView.data} />
+                ) : (
+                  <Card className="p-8 text-center border-slate-200">
+                    <p className="text-slate-500">暂无数据</p>
+                  </Card>
+                )
+              ) : isCybDividendMode ? (
+                cybDividendView?.data ? (
+                  <CybDividendCard data={cybDividendView.data} />
                 ) : (
                   <Card className="p-8 text-center border-slate-200">
                     <p className="text-slate-500">暂无数据</p>

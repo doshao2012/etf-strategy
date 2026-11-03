@@ -207,6 +207,63 @@ export function getMa200TrendStrategy(): Promise<Ma200TrendResponse> {
   return fetchAPI<Ma200TrendResponse>('/api/strategy/ma200-trend');
 }
 
+// 创业红利轮动策略：创业板指 / 中证红利 比值择时
+export interface CybDividendPoint {
+  day: string;
+  ratio: number;
+  growth: number;
+  dividend: number;
+  state: string;
+}
+
+export interface CybDividendResponse {
+  code: number;
+  message: string;
+  data: {
+    growth: {
+      symbol: string;
+      name: string;
+      price: number;
+      changePct: number | null;
+    };
+    dividend: {
+      symbol: string;
+      name: string;
+      price: number;
+      changePct: number | null;
+    };
+    ratio: number;
+    day: string;
+    state: string;
+    stateYesterday: string;
+    stateChanged: boolean;
+    action: string;
+    reason: string;
+    percentile: number | null;
+    lines: {
+      sweepBottom: number;
+      opportunity: number;
+      watch: number;
+      alert: number;
+      escapeTop: number;
+    };
+    stateOrder: string[];
+    distribution: Record<string, number>;
+    series: CybDividendPoint[];
+    params: {
+      lookbackYears: number;
+      points: number;
+    };
+    timestamp: string;
+    realtimeOk: boolean;
+    dataSource: string;
+  };
+}
+
+export function getCybDividendStrategy(): Promise<CybDividendResponse> {
+  return fetchAPI<CybDividendResponse>('/api/strategy/cyb-dividend');
+}
+
 // ETF配置相关API
 export interface EtfConfig {
   id: number;

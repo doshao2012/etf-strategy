@@ -45,3 +45,4 @@ __pycache__/
 
 # 历史数据同步的运行元信息（本地状态，不入库）
 qqq_history_meta.json
+backend/cyb_dividend_cache.json

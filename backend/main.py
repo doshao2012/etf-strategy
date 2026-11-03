@@ -179,6 +179,7 @@ def _start_warmup():
         ('ma200-trend', _compute_ma200_trend),
         ('mean-reversion', _compute_mean_reversion),
         ('oversold', _compute_oversold),
+        ('cyb-dividend', _compute_cyb_dividend),
     ])
 
 
@@ -272,6 +273,19 @@ def get_ma200_trend_strategy():
 def _compute_ma200_trend():
     try:
         return _run_script("calculate_ma200_trend.py", timeout=30)
+    except Exception as e:
+        return {"code": 500, "message": str(e)}
+
+
+@app.get("/api/strategy/cyb-dividend")
+def get_cyb_dividend_strategy():
+    """获取创业红利轮动策略（创业板指/中证红利 比值择时，实时计算不缓存）"""
+    return _trace("cyb-dividend", _compute_cyb_dividend)
+
+
+def _compute_cyb_dividend():
+    try:
+        return _run_script("calculate_cyb_dividend.py", timeout=30)
     except Exception as e:
         return {"code": 500, "message": str(e)}
 
