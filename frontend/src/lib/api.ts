@@ -282,6 +282,12 @@ export interface SpreadOption {
   source?: string;
   /** 是否为推算值（非官方直接提供） */
   estimated?: boolean;
+  /** 是否包含当日实时数据（盘中刷新 PE） */
+  live?: boolean;
+  /** 数据滞后交易日数，>0 时前端标注「数据滞后N日」 */
+  staleDays?: number;
+  /** 该标的实际最新数据日期 */
+  latestDay?: string;
   /** 分档定义，前端据此渲染图例 */
   bands?: SpreadBandDef[];
   /** 多窗口数据：10年 / 5年 各自独立算分位 */

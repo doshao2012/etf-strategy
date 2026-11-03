@@ -499,7 +499,15 @@ export default function CybDividendCard({ data }: { data: Data }) {
               （近{spreadView?.years ?? 10}年分位 {curPoint?.pct ?? curStats?.percentile ?? '-'}%，
               <span style={{ color: curBandStyle.color }}>{curBandStyle.label}</span>）
               {spreadOption.source && (
-                <span className="text-slate-300"> · 数据：{spreadOption.source}{spreadOption.estimated ? '（推算）' : ''}</span>
+                <span className="text-slate-300"> · 数据：{spreadOption.source}{spreadOption.estimated ? '（口径不同）' : ''}</span>
+              )}
+              {(spreadOption.staleDays ?? 0) > 0 && (
+                <span
+                  className="ml-1 inline-flex items-center rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 ring-1 ring-amber-200"
+                  title={`该标的最近数据为 ${spreadOption.latestDay}，比沪深300 晚 ${spreadOption.staleDays} 个交易日`}
+                >
+                  数据滞后{spreadOption.staleDays}日
+                </span>
               )}
             </p>
 

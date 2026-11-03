@@ -318,12 +318,43 @@ EM_10Y_FIELD = 'EMM00166466'   # 中国国债收益率10年
 SPREAD_YEARS = 10              # 最长显示十年
 CACHE_TTL = 24 * 3600
 
-# 股债收益差的"股"标的：腾讯行情代码 → 展示名
-# 腾讯指数行情字段 [39] 就是当前市盈率（与蛋卷/乐咕口径一致，实测 13.52 vs 13.504）
+# ====== 股债收益差 数据源 ======
+#
+# 口径基准：韭圈儿 App（股债收益差分位 71.5%、2019-01-03 = 6.59%）。
+# 经反推验证：韭圈儿用的 PE 就是「腾讯行情 PE」（13.52），两者完全一致。
+#
+#   PE 历史  → 韭圈儿 index-valuation/history（免登录，日频，2016 起 2400+ 条）
+#   PE 实时  → 腾讯行情 qt.gtimg.cn 字段[39]（与韭圈儿同口径）
+#   10Y国债  → 韭圈儿 equity-bond/national 的 china 字段（与东方财富一致，今日 1.621）
+#
+# 拼接策略（盘中能看到今天）：
+#   沪深300  → 韭圈儿历史 + 腾讯实时 PE 覆盖当日 → 盘中实时
+#   万得全A  → 腾讯没有这个代码（881001.WI 是万得付费源），
+#              只能用韭圈儿，滞后 1 个交易日，前端标注「数据滞后1日」。
+#              强行用「万得全A/沪深300 PE 比值」反推过：比值近十年均值 1.4651、
+#              标准差 0.09、变异系数 6.14%，反推误差比不推算还大，故放弃。
 SPREAD_INDEXES = [
-    ('sh000300', '沪深300'),
-    ('sh000985', '全部A股'),   # 中证全指，覆盖全市场
+    {
+        'key': 'hs300',
+        'name': '沪深300',
+        'jq_code': '000300.SH',     # 韭圈儿代码
+        'tx_symbol': 'sh000300',    # 腾讯行情代码（可实时）
+    },
+    {
+        'key': 'allA',
+        'name': '万得全A',
+        'jq_code': '881001.WI',     # 韭圈儿代码
+        'tx_symbol': None,          # 腾讯无此指数 → 无法实时
+    },
 ]
+
+JQ_API = 'https://ai2.jiucaishuo.com/api'
+JQ_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                  'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+    'Referer': 'https://www.jiucaishuo.com/',
+    'Origin': 'https://www.jiucaishuo.com',
+}
 
 
 def _load_cache2():
@@ -379,8 +410,31 @@ def _cached_series(key, fetcher, ttl=CACHE_TTL, ttl_fail=1800):
 
 
 def _fetch_y10(deadline=None):
-    """10 年期国债收益率（东方财富，日频，分页拉到 10 年前）。"""
-    def fetch():
+    """10 年期国债收益率（日频）。
+
+    主源：韭圈儿 equity-bond/national（china 字段），与东方财富口径一致
+          （今日实测两边都是 1.621），一次请求拿全 10 年，无需分页。
+    备源：东方财富 RPTA_WEB_TREASURYYIELD（原分页逻辑，源站不稳时兜底）。
+    """
+    def fetch_jq():
+        r = requests.get(f'{JQ_API}/equity-bond/national',
+                         params={'years': SPREAD_YEARS + 1},
+                         headers=JQ_HEADERS, timeout=(5, 25))
+        r.raise_for_status()
+        rows = (r.json() or {}).get('series') or []
+        out = []
+        for d in rows:
+            v = d.get('china')
+            day = d.get('date')
+            if v is not None and day:
+                out.append({'day': day, 'y10': float(v)})
+        if not out:
+            raise RuntimeError('韭圈儿国债返回空')
+        out.sort(key=lambda x: x['day'])
+        _log(f'10Y国债(韭圈儿): {len(out)} 条 ({out[0]["day"]}~{out[-1]["day"]})')
+        return out
+
+    def fetch_em():
         dl = deadline or (time.time() + 15)
         cutoff = (datetime.now() - timedelta(days=365 * (SPREAD_YEARS + 1))).strftime('%Y-%m-%d')
         out = []
@@ -409,8 +463,16 @@ def _fetch_y10(deadline=None):
         if not out:
             raise RuntimeError('10Y国债数据为空')
         out.sort(key=lambda x: x['day'])
-        _log(f'10Y国债: {len(out)} 条 ({out[0]["day"]}~{out[-1]["day"]})')
+        _log(f'10Y国债(东财): {len(out)} 条 ({out[0]["day"]}~{out[-1]["day"]})')
         return out
+
+    def fetch():
+        try:
+            return fetch_jq()
+        except Exception as e:
+            _log(f'韭圈儿国债失败，转东财: {str(e)[:80]}')
+            return fetch_em()
+
     return _cached_series('y10_treasury', fetch)
 
 
@@ -452,25 +514,49 @@ def _fetch_index_pe_now(symbol):
     return pe
 
 
-CSINDEX_HIST_URL = ('https://www.csindex.com.cn/csindex-home/perf/index-perf')
+def _fetch_jq_pe(jq_code, years=SPREAD_YEARS + 1):
+    """韭圈儿指数 PE 历史（日频，2016 起 2400+ 条，免登录）。
+
+    GET https://ai2.jiucaishuo.com/api/index-valuation/history?code=000300.SH&metric=pe
+    返回 series: [{'date': 'YYYY-MM-DD', 'value': 13.5228}, ...]
+
+    这是目前能找到的、与主流 App（韭圈儿自身、腾讯行情）**完全同口径**的
+    PE 长序列。实证：latest=13.5228 与腾讯 sh000300 的 13.52 一致；
+    用它算股债收益差，今日分位 71.50%（韭圈儿报 71.54%），
+    2019-01-03 = 6.591%（用户核对值 6.59%）。
+
+    注意：万得全A（881001.WI）在此源**滞后 1 个交易日**（update_time 比沪深300 少一天），
+    上游未提供实时值，不做推算。
+    """
+    def fetch():
+        r = requests.get(f'{JQ_API}/index-valuation/history',
+                         params={'code': jq_code, 'metric': 'pe'},
+                         headers=JQ_HEADERS, timeout=(5, 30))
+        r.raise_for_status()
+        data = r.json() or {}
+        rows = data.get('series') or []
+        out = []
+        for d in rows:
+            v = d.get('value')
+            day = d.get('date')
+            if v and float(v) > 0 and day:
+                out.append({'day': day, 'pe': float(v)})
+        if not out:
+            raise RuntimeError(f'韭圈儿 {jq_code} PE 为空')
+        out.sort(key=lambda x: x['day'])
+        _log(f'韭圈儿 {jq_code} PE {len(out)} 条'
+             f'（{out[0]["day"]}~{out[-1]["day"]}，最新 {out[-1]["pe"]:.2f}）')
+        return out
+
+    return _cached_series(f'jq_pe_{jq_code}', fetch, ttl=1800)
 
 
 def _fetch_csindex_pe(index_code, years=SPREAD_YEARS + 2):
-    """中证指数官网历史「滚动市盈率」（日频，一次请求覆盖十年以上）。
+    """中证指数官网历史「滚动市盈率」—— 仅作韭圈儿不可用时的备源。
 
-    数据源：官网指数详情页的行情接口 index-perf，返回体里 `peg` 字段
-    就是该指数的滚动市盈率（PE-TTM），**不是 PEG**。
-
-    早期曾误判这个字段是 PEG，还用「官方估值文件 PE1 ÷ peg」算了个系数去"校正"，
-    结果那条链路在 2016-2024 一直带着 -8.3% 的系统偏差，2019 年初的峰值被压掉近 0.8pp。
-    对照验证：
-      - 官网 index-perf 的 peg 与官方估值文件 PE1 的比值在 2026-10 是 0.9501（不是 1）
-      - 但 PE 序列自身在同口径下 2016~2024 稳定为常数比例，说明它是一条连贯的 PE 序列
-      - 用它算出的今日分位 82.1%、2019-01-03 股债差 6.34%，与用户提供的 82% / 6.59% 量级吻合
-
-    结论：直接用这一条序列，不做任何换算、不做任何偏移。
-
-    返回 [{'day': 'YYYY-MM-DD', 'pe': float}, ...]，按日期升序。
+    注意：此源口径与主流 App **不同**（今日 13.14 vs 腾讯/韭圈儿 13.52），
+    算出的分位会明显偏高（82% vs 71%），仅供曲线形状参考，
+    正常情况下不应走到这里。
     """
     start = (datetime.now() - timedelta(days=365 * years + 30)).strftime('%Y%m%d')
     end = datetime.now().strftime('%Y%m%d')
@@ -478,18 +564,17 @@ def _fetch_csindex_pe(index_code, years=SPREAD_YEARS + 2):
     def fetch():
         import random
         last = None
-        for attempt in range(4):
+        for attempt in range(3):
             try:
                 r = requests.get(
-                    CSINDEX_HIST_URL,
+                    'https://www.csindex.com.cn/csindex-home/perf/index-perf',
                     params={'indexCode': index_code, 'startDate': start, 'endDate': end},
                     headers={
                         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
                                       'AppleWebKit/537.36 (KHTML, like Gecko) '
                                       'Chrome/120.0 Safari/537.36',
-                        'Referer': f'https://www.csindex.com.cn/#/indices/family/detail?indexCode={index_code}',
+                        'Referer': 'https://www.csindex.com.cn/',
                         'Accept': 'application/json, text/plain, */*',
-                        'Accept-Language': 'zh-CN,zh;q=0.9',
                     },
                     timeout=(3, 20))
                 if r.status_code != 200 or not r.text.lstrip().startswith('{'):
@@ -500,105 +585,122 @@ def _fetch_csindex_pe(index_code, years=SPREAD_YEARS + 2):
                 out = []
                 for d in rows:
                     v = d.get('peg')          # 官网字段名叫 peg，实际是滚动市盈率
-                    if not v:
+                    day = str(d.get('tradeDate') or '')
+                    if not v or len(day) != 8:
                         continue
                     try:
                         pe = float(v)
                     except (TypeError, ValueError):
                         continue
-                    if pe <= 0:
-                        continue
-                    day = str(d.get('tradeDate') or '')
-                    if len(day) != 8:
-                        continue
-                    out.append({'day': f'{day[:4]}-{day[4:6]}-{day[6:8]}', 'pe': pe})
+                    if pe > 0:
+                        out.append({'day': f'{day[:4]}-{day[4:6]}-{day[6:8]}', 'pe': pe})
                 if not out:
                     last = RuntimeError('中证接口返回空')
                     time.sleep(1.2)
                     continue
                 out.sort(key=lambda x: x['day'])
-                _log(f'中证 {index_code} 滚动PE {len(out)} 条'
-                     f'（{out[0]["day"]}~{out[-1]["day"]}，最新 {out[-1]["pe"]:.2f}）')
+                _log(f'中证 {index_code} 备源 PE {len(out)} 条（口径不同，仅兜底）')
                 return out
             except Exception as e:
                 last = e
-                _log(f'中证 {index_code} PE 第{attempt+1}次失败: {str(e)[:80]}')
                 time.sleep(1.2)
         raise last or RuntimeError('中证接口失败')
 
     return _cached_series(f'csindex_pe_{index_code}', fetch)
 
-
-
-def _build_pe_from_price(symbol, name):
-    """最后的兜底：用腾讯实时PE作锚点 + 历史价格比例反推 PE。
-
-    精度不如官方数据（忽略了盈利变化），但能保证"曲线形状可用"，
-    且前端会标记为"推算"。仅在主数据源全挂时使用。
-    """
-    hist = fetch_history(symbol, HISTORY_DAYS)
-    if not hist:
-        raise RuntimeError(f'{name} 历史价格不可用')
-    pe_now = _fetch_index_pe_now(symbol)
-    now_close = hist[-1]['close'] or 1
-    out = [{'day': h['day'], 'pe': round(pe_now * (h['close'] / now_close), 3)}
-           for h in hist if h['close']]
-    if not out:
-        raise RuntimeError(f'{name} 推算失败')
-    _log(f'{name} 腾讯兜底推算 {len(out)} 条（锚点PE {pe_now}）')
-    return out
-
-
 def build_spread():
     """构建股债收益差。
-    数据源优先级：
-      1) 中证指数官网：官方日频历史PE（主路径，权威、10年全覆盖、单次请求）
-      2) 乐咕乐股：备用历史PE
-      3) 腾讯实时PE：仅当上面都失败时作为锚点标注当前值（画不出历史）
+
+    数据链路（对齐韭圈儿 App 口径）：
+      PE 历史 → 韭圈儿 index-valuation/history
+      PE 当日 → 腾讯行情 qt.gtimg.cn 字段[39]（与韭圈儿同口径，盘中实时）
+      10Y国债 → 韭圈儿 equity-bond/national（备源：东方财富）
+
+    拼接规则：
+      · 有腾讯代码的（沪深300）：历史用韭圈儿，当日用腾讯实时 PE 覆盖 →
+        盘中就能看到今天的分位
+      · 没有腾讯代码的（万得全A）：只能用韭圈儿，滞后 1 个交易日，
+        返回 staleDays=1，前端标注「数据滞后1日」，不做任何推算
+
     防御设计：
-      - 整体 deadline 8s；构建结果缓存 12h；失败结果缓存 30min；
+      - 构建结果缓存 12h；失败结果缓存 30min；
       - 完全没数据时返回 error 字段，前端显示提示，不影响比值部分。"""
     t0 = time.time()
 
     def fetch_all():
-        deadline = time.time() + 8
+        deadline = time.time() + 10
         y10 = _fetch_y10(deadline=deadline)
         if not y10:
             raise RuntimeError('10Y国债数据不可用')
         y10_map = {d['day']: d['y10'] for d in y10}
+        latest_y10_day = max(y10_map)
+        latest_y10 = y10_map[latest_y10_day]
         cutoff = (datetime.now() - timedelta(days=365 * SPREAD_YEARS)).strftime('%Y-%m-%d')
 
         options = []
         errors = []
-        for symbol, name in SPREAD_INDEXES:
-            key = 'hs300' if symbol.endswith('000300') else 'allA'
-            cs_code = '000300' if key == 'hs300' else '000985'
-            pe_series, source = None, None
+        for idx in SPREAD_INDEXES:
+            key, name = idx['key'], idx['name']
+            jq_code, tx_symbol = idx['jq_code'], idx['tx_symbol']
+            pe_series, source, live = None, None, False
 
-            # 主路径：中证指数官网滚动市盈率（PE-TTM）日频长序列。
-            # 直接取用，不做系数换算、不做偏移。
+            # --- 1) 韭圈儿历史 PE（主源，与 App 同口径）---
             try:
-                pe_series = _fetch_csindex_pe(cs_code)
-                source = '中证指数官网 · 滚动市盈率'
+                pe_series = _fetch_jq_pe(jq_code)
+                source = '韭圈儿 · PE历史'
             except Exception as e:
-                errors.append(f'{name} 中证失败: {str(e)[:50]}')
+                errors.append(f'{name} 韭圈儿失败: {str(e)[:50]}')
 
-            # 备用：腾讯实时PE + 价格推算（保证图不空）
+            # --- 2) 韭圈儿挂了才退到中证官网（口径不同，会标 estimated）---
             if not pe_series:
+                cs_code = '000300' if key == 'hs300' else '000985'
                 try:
-                    pe_series = _build_pe_from_price(symbol, name)
-                    source = '腾讯（推算）'
+                    pe_series = _fetch_csindex_pe(cs_code)
+                    source = '中证指数官网 · 口径不同（仅兜底）'
                 except Exception as e:
-                    errors.append(f'{name} 腾讯兜底失败: {str(e)[:40]}')
+                    errors.append(f'{name} 中证兜底失败: {str(e)[:40]}')
 
             if not pe_series:
                 continue
+
+            # --- 3) 腾讯实时 PE 覆盖当日（仅对腾讯有行情的指数）---
+            stale_days = 0
+            if tx_symbol:
+                try:
+                    live_pe = _fetch_index_pe_now(tx_symbol)
+                    today = date.today().strftime('%Y-%m-%d')
+                    # 用实时 PE 覆盖（或新增）今天这一条
+                    pe_series = [p for p in pe_series if p['day'] != today]
+                    pe_series.append({'day': today, 'pe': live_pe})
+                    pe_series.sort(key=lambda x: x['day'])
+                    source = '韭圈儿历史 + 腾讯实时'
+                    live = True
+                    _log(f'{name} 实时PE {live_pe} 覆盖 {today}')
+                except Exception as e:
+                    errors.append(f'{name} 腾讯实时失败: {str(e)[:40]}')
+
+            # 该指数 PE 最新日落后国债最新日多少天 → 前端据此标注滞后
+            if not live:
+                try:
+                    stale_days = max(
+                        0,
+                        (datetime.strptime(latest_y10_day, '%Y-%m-%d')
+                         - datetime.strptime(pe_series[-1]['day'], '%Y-%m-%d')).days)
+                except Exception:
+                    stale_days = 0
+
             pts = _merge_pe_yield([p for p in pe_series if p['day'] >= cutoff], y10_map)
             if pts:
                 opt = _spread_option(key, name, pts)
                 opt['source'] = source
-                opt['estimated'] = '推算' in (source or '')
+                opt['estimated'] = '口径不同' in (source or '')
+                opt['live'] = live
+                opt['staleDays'] = stale_days
+                opt['latestDay'] = pts[-1]['day']
+                opt['latestY10Day'] = latest_y10_day
                 options.append(opt)
+                _log(f'{name}: {len(pts)} 点，最新 {pts[-1]["day"]}，'
+                     f'live={live} staleDays={stale_days}')
             else:
                 errors.append(f'{name} 与国债数据无重叠')
 
