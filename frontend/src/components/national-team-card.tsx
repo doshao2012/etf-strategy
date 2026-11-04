@@ -50,33 +50,34 @@ function changeCls(p: number | null | undefined) {
   return p > 0 ? 'text-red-500' : p < 0 ? 'text-emerald-500' : 'text-slate-500';
 }
 
+// 行：手机端只显示 名称/涨跌幅/量比/状态 4 列，其余列 sm 起显示
 function EtfRow({ etf }: { etf: NationalTeamEtf }) {
   const st = STATE_STYLE[etf.state] || STATE_STYLE['数据不足'];
   return (
-    <div className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${st.row}`}>
-      <div className="w-[124px] shrink-0">
+    <div className="flex items-center gap-1.5 sm:gap-2 px-2 py-1.5 rounded text-xs">
+      <div className="flex-1 min-w-0 sm:w-[124px] sm:flex-none">
         <p className="font-medium text-slate-700 truncate">{etf.name}</p>
         <p className="text-[10px] text-slate-400">{etf.symbol}</p>
       </div>
-      <div className="w-[58px] shrink-0 text-right text-slate-600">
+      <div className="w-[58px] shrink-0 text-right text-slate-600 hidden sm:block">
         {etf.price != null ? etf.price.toFixed(3) : '-'}
       </div>
-      <div className={`w-[60px] shrink-0 text-right font-medium ${changeCls(etf.changePct)}`} title="今日涨跌幅">
+      <div className={`w-[56px] shrink-0 text-right font-medium ${changeCls(etf.changePct)}`} title="今日涨跌幅">
         {changeText(etf.changePct)}
       </div>
-      <div className="w-[68px] shrink-0 text-right text-slate-500" title="今日累计成交额">
+      <div className="w-[62px] shrink-0 text-right text-slate-500 hidden sm:block" title="今日累计成交额">
         {amtText(etf.todayAmount)}
       </div>
-      <div className="w-[48px] shrink-0 text-right font-semibold" title={`量比（成交额口径，vs 近${etf.baseDays ?? 5}日同进度基准）`}>
+      <div className="w-[46px] shrink-0 text-right font-semibold" title={`量比（成交额口径，vs 近${etf.baseDays ?? 5}日同进度基准）`}>
         <span className={st.text}>{ratioText(etf.ratio)}</span>
       </div>
-      <div className="w-[44px] shrink-0 text-right text-[11px] text-slate-400" title={`vs 近${etf.baseDaysSlow ?? 20}日基准（参考）`}>
+      <div className="w-[44px] shrink-0 text-right text-[11px] text-slate-400 hidden sm:block" title={`vs 近${etf.baseDaysSlow ?? 20}日基准（参考）`}>
         {ratioText(etf.ratioSlow)}
       </div>
-      <div className="w-[38px] shrink-0 text-right text-[11px] text-slate-400" title="同时刻历史分位（近20日，参考）">
+      <div className="w-[38px] shrink-0 text-right text-[11px] text-slate-400 hidden sm:block" title="同时刻历史分位（近20日，参考）">
         {pctText(etf.percentile)}
       </div>
-      <div className="w-[60px] shrink-0 text-right">
+      <div className="w-[52px] sm:w-[60px] shrink-0 text-right">
         <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] ring-1 ${st.chip}`}>
           {etf.error ? '异常' : etf.state}
         </span>
@@ -98,17 +99,17 @@ function GroupBlock({ group }: { group: NationalTeamGroup }) {
         )}
         <span className="text-[10px] text-slate-300 ml-auto">均量比 {ratioText(group.avgRatio)}</span>
       </div>
-      <div className="divide-y divide-slate-100 rounded border border-slate-100 bg-white">
-        {/* 表头 */}
-        <div className="flex items-center gap-2 px-2 py-1 text-[10px] text-slate-400 bg-slate-50 rounded-t">
-          <div className="w-[124px] shrink-0">名称</div>
-          <div className="w-[58px] shrink-0 text-right">现价</div>
-          <div className="w-[60px] shrink-0 text-right">涨跌幅</div>
-          <div className="w-[68px] shrink-0 text-right">成交额</div>
-          <div className="w-[48px] shrink-0 text-right">量比</div>
-          <div className="w-[44px] shrink-0 text-right">20日</div>
-          <div className="w-[38px] shrink-0 text-right">分位</div>
-          <div className="w-[60px] shrink-0 text-right">状态</div>
+      <div className="divide-y divide-slate-100 rounded border border-slate-100 bg-white overflow-x-auto">
+        {/* 表头：与行同样的响应式隐藏 */}
+        <div className="flex items-center gap-1.5 sm:gap-2 px-2 py-1 text-[10px] text-slate-400 bg-slate-50 rounded-t">
+          <div className="flex-1 min-w-0 sm:w-[124px] sm:flex-none">名称</div>
+          <div className="w-[58px] shrink-0 text-right hidden sm:block">现价</div>
+          <div className="w-[56px] shrink-0 text-right">涨跌幅</div>
+          <div className="w-[62px] shrink-0 text-right hidden sm:block">成交额</div>
+          <div className="w-[46px] shrink-0 text-right">量比</div>
+          <div className="w-[44px] shrink-0 text-right hidden sm:block">20日</div>
+          <div className="w-[38px] shrink-0 text-right hidden sm:block">分位</div>
+          <div className="w-[40px] sm:w-[60px] shrink-0 text-right">状态</div>
         </div>
         {group.etfs.map((e) => (
           <EtfRow key={e.symbol} etf={e} />
@@ -145,10 +146,10 @@ export default function NationalTeamCard({ data }: { data: Data }) {
         </div>
 
         {/* 阈值说明 */}
-        <div className="flex items-center gap-3 text-[10px] text-slate-400">
+        <div className="flex items-center flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-400">
           <span>量比 ≥ {thresholds.strong} 显著放量</span>
           <span>≥ {thresholds.alert} 放量</span>
-          <span className="ml-auto">基准：近{params.baseDaysFast}日同进度均额</span>
+          <span className="sm:ml-auto">基准：近{params.baseDaysFast}日同进度均额</span>
         </div>
 
         {/* 分组列表 */}
