@@ -1042,7 +1042,7 @@ export default function ETFRotationPage() {
                   </div>
                 ) : isNationalTeamMode ? (
                   <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1">
-                    <p className="font-medium text-slate-700 mb-1">预警规则：量比 = 今日累计成交量 ÷ 近5日同一时刻平均量</p>
+                    <p className="font-medium text-slate-700 mb-1">预警规则：量比 = 今日累计成交额 ÷ 近5日同一时刻平均成交额</p>
                     <div className="grid grid-cols-3 gap-2">
                       <div className="bg-red-50 rounded p-2">
                         <p className="font-medium text-red-600 text-xs">≥ 2.0x 显著放量</p>
@@ -1052,14 +1052,14 @@ export default function ETFRotationPage() {
                         <p className="font-medium text-orange-600 text-xs">1.5x ~ 2.0x 放量</p>
                         <p className="text-slate-500 text-[11px] leading-relaxed">观察是否持续<br/>是否伴随急跌</p>
                       </div>
-                      <div className="bg-slate-100 rounded p-2">
-                        <p className="font-medium text-slate-600 text-xs">&lt; 1.5x 正常</p>
+                      <div className="bg-emerald-50 rounded p-2">
+                        <p className="font-medium text-emerald-600 text-xs">&lt; 1.5x 正常</p>
                         <p className="text-slate-500 text-[11px] leading-relaxed">无信号<br/>不构成任何操作建议</p>
                       </div>
                     </div>
                     <p className="text-slate-500 text-[11px] pt-1.5 leading-relaxed">
                       <span className="font-medium text-slate-600">本卡片只是预警器：</span>
-                      放量 ≠ 国家队入场，也可能是套利/做市/调仓。请结合盘中走势与消息面自行二次判断。
+                      用成交额而非成交量（避免跨品种价格与份额拆分失真）。放量 ≠ 国家队入场，也可能是套利/做市/调仓。请结合盘中走势与消息面自行二次判断。
                     </p>
                   </div>
                 ) : isCybDividendMode ? (
