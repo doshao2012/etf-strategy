@@ -111,9 +111,37 @@ def update(force=False, audit_only=False):
     """
     payload = _load_json(HISTORY_FILE, {})
     hist = payload.get('data', [])
+
+    # 文件为空/缺失 → 不是"没新数据"，而是"本地历史彻底丢了"（比如换机器、误删、没被 git 跟踪）。
+    # 此时增量追加永远救不回来，必须走一次全量重建：直接从源拉 600 条落盘。
     if not hist:
-        return {'updated': False, 'added': 0, 'historyUpdated': '',
-                'stale': True, 'staleDays': None, 'error': '历史文件为空或缺失'}
+        try:
+            klines = fetch_kline(SYMBOLS['qqq'], count=FETCH_COUNT, retries=2)
+            if not klines:
+                raise RuntimeError('QQQ 日线拉取失败，无法重建历史')
+            hist = [{'day': d, 'close': c} for d, c in klines]
+            payload = {
+                'symbol': 'QQQ',
+                'source': 'tencent_qfq_day',
+                'updated': hist[-1]['day'],
+                'count': len(hist),
+                'data': hist,
+            }
+            _save_json(HISTORY_FILE, payload)
+            today = datetime.now().strftime('%Y-%m-%d')
+            _save_json(UPDATE_META_FILE, {
+                'lastRunDate': today, 'lastResult': 'ok',
+                'lastRunAt': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'historyUpdated': hist[-1]['day'], 'added': len(hist),
+                'rebuilt': True})
+            print(f'[update_qqq] 历史文件为空，已全量重建 {len(hist)} 条', file=sys.stderr)
+            return {'updated': True, 'added': len(hist), 'historyUpdated': hist[-1]['day'],
+                    'stale': _is_stale(hist[-1]['day']), 'staleDays': _age_days(hist[-1]['day']),
+                    'error': None, 'rebuilt': True}
+        except Exception as e:
+            return {'updated': False, 'added': 0, 'historyUpdated': '',
+                    'stale': True, 'staleDays': None,
+                    'error': f'历史文件为空且重建失败：{e}'}
 
     meta = _load_json(UPDATE_META_FILE, {})
     today = datetime.now().strftime('%Y-%m-%d')

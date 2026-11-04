@@ -319,10 +319,11 @@ def main():
     # 需要立即同步时传 --sync。
     _T = time.time()
     update_info = {}
+    _update_history = None
     try:
-        from update_qqq_history import update as update_history
+        from update_qqq_history import update as _update_history
         if '--sync' in sys.argv:
-            update_info = update_history(force=True)
+            update_info = _update_history(force=True)
         else:
             # 只读取新鲜度，不发网络请求
             from update_qqq_history import audit_only_status
@@ -336,11 +337,29 @@ def main():
 
     history, hist_updated = load_history()
     print(f"[MA200计时] 读历史文件 {time.time()-_T:.3f}s ({len(history)} 条)", file=sys.stderr, flush=True)
+
+    # 历史为空 = 本地文件丢了（换机器/误删/未被 git 跟踪）。这种情况不是"等下一次后台同步"能解决的，
+    # 必须就地触发一次全量重建，否则页面会永远报"历史数据不足（0 < 200）"。
+    if not history:
+        print("历史文件为空，触发一次性全量重建...", file=sys.stderr, flush=True)
+        _T = time.time()
+        try:
+            if _update_history is None:
+                from update_qqq_history import update as _update_history
+            update_info = _update_history(force=True)
+            print(f"[MA200计时] 全量重建 {time.time()-_T:.3f}s "
+                  f"({update_info.get('added', 0)} 条, err={update_info.get('error')})",
+                  file=sys.stderr, flush=True)
+        except Exception as e:
+            print(f"全量重建失败: {e}", file=sys.stderr, flush=True)
+        history, hist_updated = load_history()
+
     _T = time.time()
     if len(history) < MA_PERIOD:
         print(json.dumps({
             'code': 500,
-            'message': f'历史数据不足（{len(history)} < {MA_PERIOD}）',
+            'message': f'历史数据不足（{len(history)} < {MA_PERIOD}），且自动重建失败。'
+                       f'请在服务器执行：cd backend && python3 scripts/update_qqq_history.py --force',
             'data': None,
         }, ensure_ascii=False))
         return
