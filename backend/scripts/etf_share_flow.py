@@ -11,21 +11,30 @@ ETF 一级市场净申赎监控（份额口径）
     份额净增 100 亿则必然是机构一级申赎。
 
 数据源现实约束（2026-11 实测）：
-    * 上交所：``fund_etf_scale_sse(date='YYYYMMDD')`` 可按任意历史日期取全市场 ETF 份额，
-      实测可回溯到 2026-04 及更早（800~920 只）。→ 可算 60 日分位，但**只能逐日拉**，
-      补 60 天就是 60 次请求，因此回补放在独立进程（--backfill）里跑。
-    * 深交所：官方「基金规模 - ETF规模」页面有区间导出接口，
+    * 上交所：官方 SQL 接口 ``query.sse.com.cn/commonQuery.do``
+      （sqlId=COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SEARCH_L，参数 STAT_DATE）。
+      **不支持日期区间**，只能逐日取，但可以并发——实测 8 并发下 68 个日期 2.9 秒。
+      可回溯到 2026-04 及更早（800~920 只）。
+      （原先是走 akshare，但它只是这一层的薄封装，还多 2 秒 import 开销，
+        且默认参数写死 '20250115'，无参调用会静默返回一年前数据。）
+    * 深交所：官方「基金规模 - ETF规模」页面导出接口，
       ``www.szse.cn/api/report/ShowReport?CATALOGID=scsj_fund_jjgm&jjlb=ETF&txtStart&txtEnd``
-      一次请求（40 自然日）就返回全市场每日规模（约 8000~9000 行 / 260KB），
-      60 个交易日只需 3 次请求。**注意**：T 日份额要 T+1 傍晚才更新，
-      上午请求 txtEnd=今天 只会返回到前一交易日——所以写入时一律用
-      **接口返回的日期字段**做键，绝不能用「今天」，否则会造出连续两天份额相同、
-      净申赎恒为 0 的伪数据（见 _prune_fake_szse 兜底）。
+      **一次请求能返回 90 自然日**（实测 59 个交易日 / 43545 行 / 2.4 秒），
+      所以补 60 天分位只需要一个请求，完全不用分段。
+      **注意**：T 日份额要 T+1 傍晚才更新，上午请求 txtEnd=今天 只会返回到前一交易日——
+      所以写入时一律用**接口返回的日期字段**做键，绝不能用「今天」，否则会造出
+      连续两天份额相同、净申赎恒为 0 的伪数据（见 _prune_fake_szse 兜底）。
 
     因此本模块的策略是「当日快照 + 按需回补」：
       1. 每次调用先把最近 7~10 天的沪深份额补齐（带限流，正常只一两个请求）
-      2. --backfill 独立进程负责把历史补到 60 天以上（沪逐日、深按区间）
+      2. --backfill 独立进程负责把历史补到 60 天以上
       3. 盘中监控（monitor_national_team）传 allow_backfill=False，只读不算，绝不阻塞量比
+
+    实测总耗时（18 只标的、从零补满 60 天）：
+        优化前：串行逐日 + 深市分 3 段  →  约 50 秒
+        优化后：沪市 8 并发 + 深市单请求  →  约 2.6 秒（深交所连通时）
+    深交所是整个流程里唯一的不确定项：站点常整段不可达（Network is unreachable），
+    此时会在 5 秒超时后快速跳过，不再做四次退避重试（那会白等 30 秒）。
 
 净申赎金额口径：
     Δ份额 × 当日单位净值。净值优先用「份额变动日的收盘价」（ETF 净值≈收盘价），
@@ -57,23 +66,18 @@ SNAPSHOT_MIN_INTERVAL = 1800
 # 单个交易所网络超时
 SSE_TIMEOUT = 40
 SZSE_TIMEOUT = 60
+# 上交所并发度。接口实测 8 并发 21 天仅 0.59 秒且不报错。
+# （深交所不用并发：它的区间接口一次能返回 90 自然日，一个请求就够，
+#  并发反而会被站点判为异常请求。）
+SSE_WORKERS = 8
 
-_HAVE_AK = None
-
-
-def _ak():
-    """懒加载 akshare。它 import 很慢（约 2s），只在真正需要份额时加载。"""
-    global _HAVE_AK
-    if _HAVE_AK is None:
-        try:
-            import warnings
-            warnings.filterwarnings('ignore')
-            import akshare as ak
-            _HAVE_AK = ak
-        except Exception as e:
-            print(f'[share] akshare 不可用: {e}', file=sys.stderr)
-            _HAVE_AK = False
-    return _HAVE_AK or None
+SSE_URL = 'https://query.sse.com.cn/commonQuery.do'
+SSE_SQLID = 'COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SEARCH_L'
+SSE_HEADERS = {
+    'Referer': 'https://www.sse.com.cn/',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+}
 
 
 def _load():
@@ -108,39 +112,113 @@ def _clean_num(v):
 def fetch_sse_snapshot(date_str=None):
     """上交所全市场 ETF 份额。date_str='YYYYMMDD'，None 表示最近披露日。
 
-    重要：akshare 的 fund_etf_scale_sse() 默认参数写死成 '20250115'，
-    不带参数调用会拿到一年前的旧数据（而且经常因页面结构变化直接抛 KeyError）。
-    所以这里**必须**显式传日期，绝不能用无参调用。
+    为什么不再用 akshare：它的 fund_etf_scale_sse() 只是包了这一层 requests +
+    pandas 解析，额外带来约 2 秒的 import 开销；而且默认参数写死成 '20250115'，
+    不带参数调用会静默返回一年前的旧数据。这里直接打官方 SQL 接口，
+    单次约 0.15~0.3 秒，还能自由并发。
 
     返回 {纯代码(6位): 份额(份)}，失败返回 {}。
     """
     if not date_str:
         # 没给日期就取最近一个已披露的工作日（份额 T+1 披露，往前找几天）
-        for d in _recent_trade_dates(7):
-            got = fetch_sse_snapshot(d)
-            if got:
-                return got
+        got = fetch_sse_many(_recent_trade_dates(7))
+        if got:
+            return got[max(got)]
         return {}
 
-    ak = _ak()
-    if not ak:
-        return {}
+    got = _sse_one(date_str)
+    return got or {}
+
+
+def _sse_one(date_str):
+    """取单个日期的上交所份额。非交易日返回 None（接口给空 result）。
+
+    返回 {纯代码: 份额}，非交易日/失败返回 None 以便调用方区分「没数据」和「空表」。
+    """
     try:
-        df = ak.fund_etf_scale_sse(date=date_str)
+        import requests
     except Exception:
-        # 非交易日/尚未披露时 akshare 内部会抛 KeyError，属预期，静默跳过
+        return None
+    params = {
+        'isPagination': 'true', 'pageHelp.pageSize': '10000',
+        'pageHelp.pageNo': '1', 'pageHelp.beginPage': '1',
+        'pageHelp.cacheSize': '1', 'pageHelp.endPage': '1',
+        'sqlId': SSE_SQLID,
+        'STAT_DATE': _dash(date_str),
+    }
+    for attempt in range(3):
+        try:
+            r = requests.get(SSE_URL, params=params, headers=SSE_HEADERS,
+                             timeout=(5, SSE_TIMEOUT))
+            if r.status_code != 200:
+                raise RuntimeError(f'HTTP {r.status_code}')
+            rows = (r.json() or {}).get('result') or []
+            if not rows:
+                return None            # 非交易日 / 未披露
+            out = {}
+            for row in rows:
+                code = str(row.get('SEC_CODE', '')).strip().zfill(6)
+                # TOT_VOL 单位是「万份」，akshare 也是 ×10000 还原成「份」
+                sh = _clean_num(row.get('TOT_VOL'))
+                if code and sh and sh > 0:
+                    out[code] = sh * 10000
+            return out or None
+        except Exception:
+            if attempt < 2:
+                time.sleep(0.5 + attempt)
+                continue
+            return None
+
+
+def fetch_sse_many(date_list):
+    """并发抓多日上交所份额。
+
+    串行 60 天要 60 个往返；实测 8 并发下 21 天仅 0.59 秒，
+    是整套回补里性价比最高的一处优化。
+
+    返回 {YYYYMMDD: {纯代码: 份额}}，自动丢掉非交易日。
+    """
+    if not date_list:
         return {}
-    if df is None or len(df) == 0:
-        return {}
-    if '基金代码' not in df.columns or '基金份额' not in df.columns:
-        return {}
+    import concurrent.futures as _fut
     out = {}
-    for _, row in df.iterrows():
-        code = str(row.get('基金代码', '')).strip().zfill(6)
-        sh = _clean_num(row.get('基金份额'))
-        if code and sh and sh > 0:
-            out[code] = sh
+    with _fut.ThreadPoolExecutor(max_workers=SSE_WORKERS) as ex:
+        for d, got in zip(date_list, ex.map(_sse_one, date_list)):
+            if got:
+                out[d] = got
     return out
+
+
+def _read_excel_fast(content):
+    """把 xlsx 字节读成 DataFrame，优先 calamine（Rust 实现，快约 10 倍）。
+
+    实测同一份 260KB / 8440 行的深交所导出：openpyxl 0.55s，calamine 0.05s。
+    calamine 是可选依赖，服务器没装时自动退回 openpyxl，不影响功能。
+    """
+    try:
+        import io
+        import pandas as pd
+    except Exception:
+        return None
+    for engine in ('calamine', None):
+        try:
+            kw = {'dtype': {'基金代码': str}}
+            if engine:
+                kw['engine'] = engine
+            return pd.read_excel(io.BytesIO(content), **kw)
+        except Exception:
+            continue
+    return None
+
+
+def _is_conn_error(e):
+    """判断异常是否为「连不上」（此时重试大概率还是连不上，应立即返回）"""
+    name = type(e).__name__
+    if name in ('ConnectionError', 'ConnectTimeout', 'Timeout', 'ReadTimeout'):
+        return True
+    msg = str(e)
+    return ('Network is unreachable' in msg or 'Failed to establish a new connection' in msg
+            or 'Max retries exceeded' in msg)
 
 
 def fetch_szse_snapshot():
@@ -181,28 +259,42 @@ def fetch_szse_range(start_date, end_date):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
                              '(KHTML, like Gecko) Chrome/120.0 Safari/537.36',
                'Referer': 'https://www.szse.cn/market/fund/volume/lof/index.html'}
-    # 深交所站点抖动大，实测经常首次连接就断，多试几次
+    # 深交所站点抖动大，实测经常首次连接就断，多试几次。
+    # 但站点整体不可达时重试纯属浪费时间，所以区分两类失败：
+    #   连接层失败（ConnectionError/Timeout）→ 立刻判死，交给上层决定要不要再试
+    #   内容层异常（HTTP 非 200 / 体积异常）→ 值得重试
     for attempt in range(4):
         try:
             r = requests.get(url, params=params, headers=headers, timeout=(5, SZSE_TIMEOUT))
             if r.status_code != 200 or len(r.content) < 5000:
                 raise RuntimeError(f'HTTP {r.status_code} / {len(r.content)}B')
-            df = pd.read_excel(io.BytesIO(r.content), dtype={'基金代码': str})
-            if '基金代码' not in df.columns:
+            df = _read_excel_fast(r.content)
+            if df is None or '基金代码' not in df.columns:
                 return {}
             out = {}
-            for _, row in df.iterrows():
-                code = str(row.get('基金代码', '')).strip().zfill(6)
-                day = str(row.get('日期', ''))[:10].replace('-', '')
+            # 按列名定位，避免依赖列顺序
+            ci = {c: i for i, c in enumerate(df.columns)}
+            i_code, i_day, i_sh = ci.get('基金代码'), ci.get('日期'), ci.get('基金规模(份)')
+            if i_code is None or i_day is None or i_sh is None:
+                return {}
+            # itertuples 比 iterrows 快一个量级（8440 行 × 3 列）
+            for tup in df.itertuples(index=False, name=None):
+                code = str(tup[i_code]).strip().zfill(6)
+                day = str(tup[i_day])[:10].replace('-', '')
                 # 规模单位是「份」（表头写基金规模(份)）
-                sh = _clean_num(row.get('基金规模(份)'))
+                sh = _clean_num(tup[i_sh])
                 if not code or not day or not sh or sh <= 0:
                     continue
                 out.setdefault(day, {})[code] = sh
             return out
         except Exception as e:
+            if _is_conn_error(e):
+                # 站点整体不可达，四次退避重试只会白等 30 秒，直接放弃
+                print(f'[share] 深交所 {start_date}~{end_date} 连接不可达，跳过',
+                      file=sys.stderr)
+                return {}
             if attempt < 3:
-                time.sleep(2 + attempt * 2)
+                time.sleep(1 + attempt)
                 continue
             print(f'[share] 深交所 {start_date}~{end_date} 抓取失败: '
                   f'{type(e).__name__}: {e}', file=sys.stderr)
@@ -216,32 +308,31 @@ def _dash(d):
 
 
 def backfill_szse(payload, days, symbols=None, target_days=PERCENTILE_DAYS):
-    """用深交所历史规模接口按区间回补，一次补多天，比逐日探测快得多。
+    """用深交所历史规模接口回补，**一个请求拿完整段历史**。
 
-    接口按日期区间返回全市场，所以策略是「大区间分段倒着拉」：
-    从今天开始，每段往回 40 个自然日（≈28 个交易日），
-    累积到 target_days 天就停。最多 6 段（≈240 自然日），避免被单次调用拖太久。
+    关键实测结论：这个接口不限制区间长度。
+    请求 txtStart=今天-90d ~ txtEnd=今天，一次返回 59 个交易日、43545 行、
+    约 2.4 秒（含解析）。所以完全不需要分 3 段——早期版本按 40 自然日分段，
+    纯属把 1 次请求拆成 3 次，白白多承担两次站点抖动风险。
+
+    只有在一种情况下才需要第二个请求：目标天数超过单次区间能覆盖的量
+    （60 个交易日 ≈ 85 自然日，所以按 90 自然日拉基本一次到位）。
 
     symbols：本次关心的标的，用于判断「够不够」。不给就按全市场深市代码数判断。
     """
-    sz_codes = [s[2:] for s in (symbols or []) if s.startswith('sz')]
-
-    def _have_days():
-        if sz_codes:
-            return sum(1 for d in days if any(c in days[d] for c in sz_codes))
-        return sum(1 for d in days if _szse_count(days[d]) > 0)
-
-    if _have_days() >= target_days:
+    if _szse_have_days(days, symbols) >= target_days:
         return payload
 
-    end = datetime.now()
     total_added = 0
-    for seg in range(6):
-        if _have_days() >= target_days:
+    end = datetime.now()
+    # 第一次拉 90 自然日（≈60 个交易日，正好覆盖分位窗口）；
+    # 若还不够（窗口里节假日特别多），再往前补一段 60 天，最多两轮。
+    for span in (90, 60):
+        if _szse_have_days(days, symbols) >= target_days:
             break
-        start = end - timedelta(days=40)
+        start = end - timedelta(days=span)
         s, e = start.strftime('%Y%m%d'), end.strftime('%Y%m%d')
-        got = fetch_szse_range(s, e)
+        got = fetch_szse_range(s, e) or {}
         if not got:
             break
         added = 0
@@ -252,10 +343,9 @@ def backfill_szse(payload, days, symbols=None, target_days=PERCENTILE_DAYS):
             days.setdefault(day, {}).update(m)
             added += 1
         total_added += added
-        print(f'[share] 深交所回补 {s}~{e}: +{added} 天（累计 {_have_days()} 天）',
+        print(f'[share] 深交所回补 {s}~{e}: +{added} 天（累计 {_szse_have_days(days, symbols)} 天）',
               file=sys.stderr, flush=True)
-        if added == 0 and seg >= 1:
-            # 连续两段都空，基本可以判定再往前也没数据了
+        if added == 0:
             break
         end = start - timedelta(days=1)
 
@@ -272,6 +362,14 @@ def _szse_count(mapping):
     if not mapping:
         return 0
     return sum(1 for c in mapping if c[:2] in ('15', '16', '18'))
+
+
+def _szse_have_days(days, symbols=None):
+    """本地已有多少天的深市份额（按关注标的判断，不给标的就按全市场深市代码数）"""
+    sz_codes = [s[2:] for s in (symbols or []) if s.startswith('sz')]
+    if sz_codes:
+        return sum(1 for d in days if any(c in days[d] for c in sz_codes))
+    return sum(1 for d in days if _szse_count(days[d]) > 0)
 
 
 def _shift_day(d, offset):
@@ -356,30 +454,38 @@ def ensure_history(symbols, force_snapshot=False, allow_backfill=True):
     last_ts = meta.get('lastSnapshotTs', 0)
     fresh_enough = (last_snap == today_dash) and (time.time() - last_ts < SNAPSHOT_MIN_INTERVAL)
     if force_snapshot or not fresh_enough:
+        # 沪深快照没有依赖，直接并发跑，省掉一次串行等待。
+        # 深交所：若本地深市历史还不够（说明接下来要跑回补），就**不单独发快照请求**——
+        # 回补那一次 90 天区间请求本来就包含最近几天，重复请求纯属浪费，
+        # 而深交所单次失败要等 5 秒才判死，在抖动时段这笔开销相当可观。
+        import concurrent.futures as _fut
         added = 0
-        if need_sh:
-            sh_codes = _sh_codes_from(symbols)
-            for dstr in _recent_trade_dates(7):
-                if days.get(dstr) and any(c in days[dstr] for c in sh_codes):
-                    continue
-                got = fetch_sse_snapshot(dstr)
-                if got:
-                    days.setdefault(dstr, {}).update(got)
+        sz_got = {}
+        sz_need_backfill = need_sz and _szse_have_days(days, symbols) < PERCENTILE_DAYS
+        skip_sz_snapshot = allow_backfill and sz_need_backfill
+        with _fut.ThreadPoolExecutor(max_workers=2) as ex:
+            f_sh = ex.submit(_sse_recent_snapshot, days, symbols) if need_sh else None
+            recent = _recent_trade_dates(10)
+            f_sz = (ex.submit(fetch_szse_range, min(recent), max(recent))
+                    if (need_sz and recent and not skip_sz_snapshot) else None)
+            if f_sh is not None:
+                sh_got = f_sh.result() or {}
+                for dstr, m in sh_got.items():
+                    days.setdefault(dstr, {}).update(m)
                     added += 1
-        if need_sz:
+            if f_sz is not None:
+                sz_got = f_sz.result() or {}
+        if sz_got:
             # 深交所一次性拉最近 10 个自然日，覆盖 T+1 披露窗口。
             # 关键：写入时一律用**接口返回的日期字段**做键，绝不用「今天」。
             # 深交所份额是 T+1 傍晚才更新，上午请求 txtEnd=今天 只会返回到前一交易日，
             # 早前版本误把返回值记到当天，导致连续两天份额完全相同、净申赎恒为 0。
-            recent = _recent_trade_dates(10)
-            got = fetch_szse_range(min(recent), max(recent)) if recent else {}
-            for day, m in got.items():
+            for day, m in sz_got.items():
                 before = len(days.get(day) or {})
                 days.setdefault(day, {}).update(m)
                 if len(days[day]) > before:
                     added += 1
-            if got:
-                meta['lastSzseSnapshotDay'] = max(got)
+            meta['lastSzseSnapshotDay'] = max(sz_got)
         meta['lastSnapshotDate'] = today_dash
         meta['lastSnapshotTs'] = time.time()
         meta['snapshotAdded'] = added
@@ -390,24 +496,27 @@ def ensure_history(symbols, force_snapshot=False, allow_backfill=True):
     if not allow_backfill:
         return payload
 
-    # 2) 上交所历史回补：本地不足 PERCENTILE_DAYS 天时按日期补齐
+    # 2) 上交所历史回补：本地不足 PERCENTILE_DAYS 天时按日期补齐。
+    #    逐日接口无法取区间，但可以并发——一次把缺的日期全丢进去。
     if need_sh:
         sh_codes = _sh_codes_from(symbols)
+        # 注意：判断「这天有没有沪市数据」必须看沪市代码是否存在，
+        # 不能用 `d not in days`——沪深同一天存在同一个日期键下，
+        # 深市有数据不代表沪市有数据（曾因此把 81 天沪市数据全跳过）。
         have = sum(1 for d in days if any(c in days[d] for c in sh_codes))
         if have < PERCENTILE_DAYS:
-            # 先把已有日期标出来，从最近的日期倒着补，凑够 60 天即止
             target = _recent_trade_dates(BACKFILL_CALENDAR_DAYS)
-            todo = [d for d in target if d not in days]
-            for dstr in todo:
-                got = fetch_sse_snapshot(dstr)
-                if not got:
-                    continue          # 非交易日 / 未披露，跳过
-                days[dstr] = got
-                if _count_days_for(days, symbols) >= PERCENTILE_DAYS:
-                    break
+            todo = [d for d in target
+                    if not any(c in (days.get(d) or {}) for c in sh_codes)]
+            t0 = time.time()
+            got = fetch_sse_many(todo)
+            for dstr in sorted(got, reverse=True):
+                days[dstr] = got[dstr]
             meta['lastBackfillTs'] = time.time()
             _save(payload)
-            print(f'[share] 上交所回补完成，现有关键标的 {_count_days_for(days, symbols)} 天',
+            now_have = sum(1 for d in days if any(c in days[d] for c in sh_codes))
+            print(f'[share] 上交所回补 {len(got)}/{len(todo)} 天，'
+                  f'耗时 {time.time() - t0:.1f}s，现有 {now_have} 天',
                   file=sys.stderr, flush=True)
 
     # 3) 深交所历史回补：官方 scsj_fund_jjgm 区间接口，一次能拉一段全市场
@@ -417,6 +526,14 @@ def ensure_history(symbols, force_snapshot=False, allow_backfill=True):
             backfill_szse(payload, days, symbols=symbols)
 
     return payload
+
+
+def _sse_recent_snapshot(days, symbols):
+    """补齐最近 7 个工作日的上交所份额（已有的日期跳过），返回新增的 {日期: 份额}。"""
+    sh_codes = _sh_codes_from(symbols)
+    todo = [d for d in _recent_trade_dates(7)
+            if not (days.get(d) and any(c in days[d] for c in sh_codes))]
+    return fetch_sse_many(todo) if todo else {}
 
 
 def _sh_codes_from(symbols):

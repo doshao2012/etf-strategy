@@ -7,3 +7,9 @@ lxml>=5.0.0
 numpy>=1.26.0
 pandas>=2.0.0
 python-dateutil>=2.8.0
+
+# 读深交所导出的 xlsx（ETF 份额历史）。两者装一个即可：
+#   python-calamine 是 Rust 实现，解析同一份 8440 行导出只要 0.05s（openpyxl 要 0.55s），
+#   代码里优先用它，缺失时自动降级到 openpyxl，所以这里两个都列上、都不强制。
+python-calamine>=0.2.0
+openpyxl>=3.1.0
