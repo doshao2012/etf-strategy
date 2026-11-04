@@ -29,13 +29,24 @@ function amtText(v: number | null | undefined) {
   return `${yi.toFixed(2)} 亿`;
 }
 
-// 净申赎：带符号，小额也保留两位
+// 净申赎金额：带符号，元 → 亿元
 function netText(v: number | null | undefined) {
   if (v === null || v === undefined) return '-';
   const yi = v / 1e8;
   const abs = Math.abs(yi);
   const body = abs >= 100 ? abs.toFixed(0) : abs >= 10 ? abs.toFixed(1) : abs.toFixed(2);
   return `${yi > 0 ? '+' : yi < 0 ? '-' : ''}${body} 亿`;
+}
+
+// 净申购份额：带符号，份 → 亿份。
+// 和金额并列显示的理由：金额会被价格波动放大/缩小，份额才是申赎行为本身；
+// 官方口径（深交所/上交所规模表）给的就是份额，两者一起看才不会被单价迷惑。
+function netSharesText(v: number | null | undefined) {
+  if (v === null || v === undefined) return '';
+  const yi = v / 1e8;
+  const abs = Math.abs(yi);
+  const body = abs >= 100 ? abs.toFixed(0) : abs >= 10 ? abs.toFixed(1) : abs.toFixed(2);
+  return `${yi > 0 ? '+' : yi < 0 ? '-' : ''}${body} 亿份`;
 }
 
 // 净申赎配色：净申购=红（资金进场），净赎回=绿（资金离场），A 股习惯
@@ -70,11 +81,13 @@ function asOfText(d: string | null | undefined) {
   return `${d.slice(4, 6)}-${d.slice(6, 8)}`;
 }
 
-// 沪深披露时点不同（沪 T 日盘后、深 T+1 傍晚），两端日期不一致时显示成区间
+// 沪深披露时点不同（沪 T 日盘后、深 T+1 傍晚），两端日期不一致时显示成区间。
+// 注意措辞：这里说的是「份额的日期」，不是金额的日期——金额由相邻两日份额差算出，
+// 早前写成「11-04 份额」紧挨着金额，容易被误读成「11-04 的金额」。
 function asOfRange(min: string | null | undefined, max: string | null | undefined) {
   if (!max) return '';
-  if (!min || min === max) return `${asOfText(max)} 份额`;
-  return `${asOfText(min)}~${asOfText(max)} 份额`;
+  if (!min || min === max) return `份额 ${asOfText(max)}`;
+  return `份额 ${asOfText(min)}~${asOfText(max)}`;
 }
 
 function ratioText(r: number | null | undefined) {
@@ -164,7 +177,9 @@ function EtfCard({ etf, rank }: { etf: NationalTeamEtf; rank: number }) {
           <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 border-b border-slate-100">
             <span className="text-[10px] font-medium text-slate-500">一级市场净申赎</span>
             {etf.netAsOf && (
-              <span className="text-[9px] text-slate-400 tabular-nums">{asOfText(etf.netAsOf)} 份额</span>
+              <span className="text-[9px] text-slate-400 tabular-nums">
+                份额日 {asOfText(etf.netAsOf)}
+              </span>
             )}
             <span className="ml-auto text-[9px] text-slate-300">T+1 披露 · 非实时</span>
           </div>
@@ -179,20 +194,31 @@ function EtfCard({ etf, rank }: { etf: NationalTeamEtf; rank: number }) {
                 <p className={`text-sm font-bold tabular-nums ${netCls(etf.netAmount)}`}>
                   {netText(etf.netAmount)}
                 </p>
+                {etf.netShares !== null && etf.netShares !== undefined && (
+                  <p className="text-[9px] text-slate-400 tabular-nums mt-0.5">
+                    {netSharesText(etf.netShares)}
+                  </p>
+                )}
               </div>
               <div className="px-2 py-1.5 text-center">
                 <p className="text-[9px] text-slate-400 mb-0.5">近5日累计</p>
                 <p className={`text-sm font-bold tabular-nums ${netCls(etf.net5Amount)}`}>
                   {netText(etf.net5Amount)}
                 </p>
+                {etf.net5Shares !== null && etf.net5Shares !== undefined && (
+                  <p className="text-[9px] text-slate-400 tabular-nums mt-0.5">
+                    {netSharesText(etf.net5Shares)}
+                  </p>
+                )}
               </div>
               <div className="px-2 py-1.5 text-center">
                 <p className="text-[9px] text-slate-400 mb-0.5">
-                  分位{etf.netDays ? `(${etf.netDays}日)` : ''}
+                  份额分位{etf.netDays ? `(${etf.netDays}日)` : ''}
                 </p>
                 <p className={`text-sm font-bold tabular-nums ${pctOfNetCls(etf.netPercentile, etf.netAmount)}`}>
                   {pctOfNetText(etf.netPercentile)}
                 </p>
+                <p className="text-[9px] text-slate-400 mt-0.5">越高越异常</p>
               </div>
             </div>
           )}
@@ -264,13 +290,21 @@ export default function NationalTeamCard({ data }: { data: Data }) {
       {summary.netTotal !== null && summary.netTotal !== undefined && (
         <div className="mb-3 mx-1 rounded-lg bg-gradient-to-r from-slate-50 to-white ring-1 ring-slate-200 px-3 py-2">
           <div className="flex items-center flex-wrap gap-x-3 gap-y-1">
-            <span className="text-[10px] font-medium text-slate-500">一级市场合计净申赎</span>
+            <span className="text-[10px] font-medium text-slate-500">一级市场合计净申购</span>
             <span className={`text-sm font-bold tabular-nums ${netCls(summary.netTotal)}`}>
               {netText(summary.netTotal)}
             </span>
+            {summary.netSharesTotal !== null && summary.netSharesTotal !== undefined && (
+              <span className="text-[10px] text-slate-400 tabular-nums">
+                {netSharesText(summary.netSharesTotal)}
+              </span>
+            )}
             {summary.netTotal5 !== null && (
               <span className="text-[10px] text-slate-400">
                 近5日 <span className={`font-semibold tabular-nums ${netCls(summary.netTotal5)}`}>{netText(summary.netTotal5)}</span>
+                {summary.netSharesTotal5 !== null && summary.netSharesTotal5 !== undefined && (
+                  <span className="tabular-nums"> / {netSharesText(summary.netSharesTotal5)}</span>
+                )}
               </span>
             )}
             <span className="text-[10px] text-slate-400">

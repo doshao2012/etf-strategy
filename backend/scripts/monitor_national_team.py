@@ -793,10 +793,14 @@ def main():
             'symbol': s, 'name': n, 'state': '数据不足', 'error': '未返回'}
             for s, n in grp['etfs']]
         # 挂上净申赎（一级市场份额口径，T+1 披露）
+        # 金额和份额一起给：金额=Δ份额×收盘价，会被单价放大；
+        # 份额才是申赎行为本身，也是交易所官方口径，两个并列才能对照。
         for it in items:
             sf = share_map.get(it.get('symbol')) or {}
             it['netAmount'] = round(sf['netAmount'], 0) if sf.get('netAmount') is not None else None
+            it['netShares'] = round(sf['netShares'], 0) if sf.get('netShares') is not None else None
             it['net5Amount'] = round(sf['net5Amount'], 0) if sf.get('net5Amount') is not None else None
+            it['net5Shares'] = round(sf['net5Shares'], 0) if sf.get('net5Shares') is not None else None
             it['netPercentile'] = sf.get('percentile')
             it['netAsOf'] = sf.get('asOf')
             it['netDays'] = sf.get('days')
@@ -842,6 +846,11 @@ def main():
         # 一级市场：全样本合计净申赎（正=净申购）
         'netTotal': round(sum(x['netAmount'] for x in net_rows), 0) if net_rows else None,
         'netTotal5': round(sum(x['net5Amount'] for x in net_rows), 0) if net_rows else None,
+        # 份额合计：与金额并列，用于对照「金额大到底是申赎多还是单价高」
+        'netSharesTotal': (round(sum(x['netShares'] for x in net_rows), 0)
+                           if net_rows else None),
+        'netSharesTotal5': (round(sum(x['net5Shares'] for x in net_rows), 0)
+                            if net_rows else None),
         'netInflowCount': sum(1 for x in net_rows if x['netAmount'] > 0),
         'netOutflowCount': sum(1 for x in net_rows if x['netAmount'] < 0),
         'netCount': len(net_rows),

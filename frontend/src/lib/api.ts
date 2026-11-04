@@ -389,8 +389,12 @@ export interface NationalTeamEtf {
 
   /** 一级市场最新一日净申赎金额（元，正=净申购，负=净赎回）。份额 T+1 披露 */
   netAmount?: number | null;
+  /** 最新一日净申赎份额（份，正=净申购，负=净赎回）。交易所官方口径，不受单价影响 */
+  netShares?: number | null;
   /** 近 5 日累计净申赎金额（元） */
   net5Amount?: number | null;
+  /** 近 5 日累计净申赎份额（份） */
+  net5Shares?: number | null;
   /** 净申赎在一级市场近 60 日中的分位 0~1（0.95 = 申购强度超过历史 95% 的交易日） */
   netPercentile?: number | null;
   /** 净申赎对应的份额日期 YYYYMMDD */
@@ -425,6 +429,10 @@ export interface NationalTeamResponse {
       netTotal: number | null;
       /** 全样本近 5 日累计净申赎（元） */
       netTotal5: number | null;
+      /** 全样本合计净申赎份额（份），与金额对照看 */
+      netSharesTotal?: number | null;
+      /** 全样本近 5 日累计净申赎份额（份） */
+      netSharesTotal5?: number | null;
       netInflowCount: number;
       netOutflowCount: number;
       /** 有净申赎数据的标的数（深市可能为 0） */

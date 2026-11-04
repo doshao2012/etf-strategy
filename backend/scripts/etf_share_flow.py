@@ -373,7 +373,12 @@ def backfill_szse(payload, days, symbols=None, target_days=PERCENTILE_DAYS):
 
     symbols：本次关心的标的，用于判断「够不够」。不给就按全市场深市代码数判断。
     """
-    if _szse_have_days(days, symbols) >= target_days:
+    have = _szse_have_days(days, symbols)
+    newest = _szse_newest_day(days, symbols)
+    # 天数够 **且** 已经拿到最近披露日，才认为不需要回补。
+    # 只看天数会漏掉这种情况：本地攒了 100 天，但最新几天停在上周——
+    # 天数早就超 60，可数据根本不新（曾因此让深市一直停在 11-03）。
+    if have >= target_days and not _szse_stale(newest):
         return payload
 
     end = datetime.now()
@@ -430,6 +435,38 @@ def _szse_have_days(days, symbols=None):
     if sz_codes:
         return sum(1 for d in days if any(c in days[d] for c in sz_codes))
     return sum(1 for d in days if _szse_count(days[d]) > 0)
+
+
+def _szse_newest_day(days, symbols=None):
+    """本地深市份额的最新日期（YYYYMMDD），没有则 None"""
+    sz_codes = [s[2:] for s in (symbols or []) if s.startswith('sz')]
+
+    def _ok(m):
+        if sz_codes:
+            return any(c in m for c in sz_codes)
+        return _szse_count(m) > 0
+
+    ds = [d for d in days if _ok(days[d])]
+    return max(ds) if ds else None
+
+
+def _szse_stale(newest):
+    """深市最新份额是否「不够新」，需要再去拉一次。
+
+    深交所披露节奏：T 日份额在 T+1 傍晚更新（实测 11-04 的份额在 11-04 当天
+    晚间就已可取，说明当日盘后一段时间即可查）。所以判定标准是：
+      * 最新日期 >= 今天            → 够新
+      * 最新日期 == 上一交易日       → 只有「今天已经收盘且还没到今晚更新」可以接受，
+                                      其余情况都应该再拉一次试试
+      * 更旧                        → 陈旧，必须回补
+
+    直接说人话：**只要最新日期不是今天，就再拉一次**。成本只有 1 个请求（约 3 秒），
+    而漏掉一天会让整条净申赎链路的日期差一天——这个代价远高于多拉一次。
+    """
+    if not newest:
+        return True
+    today = datetime.now().strftime('%Y%m%d')
+    return newest < today
 
 
 def _shift_day(d, offset):
@@ -579,11 +616,11 @@ def ensure_history(symbols, force_snapshot=False, allow_backfill=True):
                   f'耗时 {time.time() - t0:.1f}s，现有 {now_have} 天',
                   file=sys.stderr, flush=True)
 
-    # 3) 深交所历史回补：官方 scsj_fund_jjgm 区间接口，一次能拉一段全市场
+    # 3) 深交所历史回补：官方 scsj_fund_jjgm 区间接口，一次能拉一段全市场。
+    #    这里不做「天数够就跳过」的判断——backfill_szse 内部会同时检查
+    #    天数是否够、最新日期是否新鲜，避免「天数够但数据停在几天前」。
     if need_sz:
-        before = _count_days_for(days, [s for s in symbols if s.startswith('sz')])
-        if before < PERCENTILE_DAYS:
-            backfill_szse(payload, days, symbols=symbols)
+        backfill_szse(payload, days, symbols=symbols)
 
     return payload
 
@@ -618,6 +655,7 @@ def compute_one(payload, symbol, price_today=None, price_prev=None, price_map=No
         netAmount     最新一日净申赎金额（元，正=净申购）
         netShares     最新一日净申赎份额（份）
         net5Amount    近 5 日累计净申赎金额（元）
+        net5Shares    近 5 日累计净申赎份额（份）
         percentile    该净申赎在近 N 日中的分位（0~1）
         days          实际用于计算的交易日数
         asOf          最新份额对应的日期（YYYYMMDD）
@@ -683,6 +721,8 @@ def compute_one(payload, symbol, price_today=None, price_prev=None, price_map=No
         base['net5Amount'] = sum(n[1] * n[2] for n in recent5)
     else:
         base['net5Amount'] = None
+    # 近 5 日累计份额变动：不依赖价格，永远可算，用于对照金额是否被单价放大
+    base['net5Shares'] = sum(n[1] for n in recent5) if recent5 else None
     base['net5Days'] = len(recent5)
 
     return base
