@@ -180,6 +180,7 @@ def _start_warmup():
         ('mean-reversion', _compute_mean_reversion),
         ('oversold', _compute_oversold),
         ('cyb-dividend', _compute_cyb_dividend),
+        ('national-team', _compute_national_team),
     ])
 
 
@@ -286,6 +287,19 @@ def get_cyb_dividend_strategy():
 def _compute_cyb_dividend():
     try:
         return _run_script("calculate_cyb_dividend.py", timeout=30)
+    except Exception as e:
+        return {"code": 500, "message": str(e)}
+
+
+@app.get("/api/strategy/national-team")
+def get_national_team_strategy():
+    """获取国家队监控（宽基ETF成交量异动预警，脚本内部有55s分时缓存）"""
+    return _trace("national-team", _compute_national_team)
+
+
+def _compute_national_team():
+    try:
+        return _run_script("monitor_national_team.py", timeout=60)
     except Exception as e:
         return {"code": 500, "message": str(e)}
 

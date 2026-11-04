@@ -49,3 +49,6 @@ backend/cyb_dividend_cache.json
 
 # 中证官方 PE 累积库（每天抓取自增长，属运行时状态，不入库）
 backend/csindex_pe_history.json
+
+# 国家队监控运行时缓存（55s 过期的分时快照，不入库）
+backend/national_team_cache.json

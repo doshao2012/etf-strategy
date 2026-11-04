@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { getETFStrategy, getOversoldStrategy, getMeanReversionStrategy, getMa200TrendStrategy, getCybDividendStrategy, getEtfConfigs, updateEtfConfig, createEtfConfig, deleteEtfConfig, type EtfConfig, type MeanReversionETF, type MeanReversionResponse, type Ma200TrendResponse, type CybDividendResponse } from '@/lib/api';
+import { getETFStrategy, getOversoldStrategy, getMeanReversionStrategy, getMa200TrendStrategy, getCybDividendStrategy, getNationalTeam, getEtfConfigs, updateEtfConfig, createEtfConfig, deleteEtfConfig, type EtfConfig, type MeanReversionETF, type MeanReversionResponse, type Ma200TrendResponse, type CybDividendResponse, type NationalTeamResponse } from '@/lib/api';
 import Ma200TrendCard from '@/components/ma200-trend-card';
 import CybDividendCard from '@/components/cyb-dividend-card';
+import NationalTeamCard from '@/components/national-team-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -14,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { RefreshCw, Settings, Plus, Pencil, Trash2, Shield } from 'lucide-react';
 
-type StrategyType = 'rotation' | 'oversold' | 'meanReversion' | 'ma200Trend' | 'cybDividend';
+type StrategyType = 'rotation' | 'oversold' | 'meanReversion' | 'ma200Trend' | 'cybDividend' | 'nationalTeam';
 
 // 趋势轮动ETF数据
 interface DailySnapshot {
@@ -732,6 +733,7 @@ export default function ETFRotationPage() {
   const [meanReversionData, setMeanReversionData] = useState<MeanReversionResponse | null>(null);
   const [ma200TrendData, setMa200TrendData] = useState<Ma200TrendResponse | null>(null);
   const [cybDividendData, setCybDividendData] = useState<CybDividendResponse | null>(null);
+  const [nationalTeamData, setNationalTeamData] = useState<NationalTeamResponse | null>(null);
   const [configs, setConfigs] = useState<EtfConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -780,6 +782,9 @@ export default function ETFRotationPage() {
       } else if (strategyAtRequest === 'ma200Trend') {
         const trend = await getMa200TrendStrategy();
         if (!isStale()) setMa200TrendData(trend as Ma200TrendResponse);
+      } else if (strategyAtRequest === 'nationalTeam') {
+        const nt = await getNationalTeam();
+        if (!isStale()) setNationalTeamData(nt as NationalTeamResponse);
       } else {
         const cyb = await getCybDividendStrategy();
         if (!isStale()) setCybDividendData(cyb as CybDividendResponse);
@@ -809,23 +814,34 @@ export default function ETFRotationPage() {
     loadConfigs();
   }, [currentStrategy]);
 
+  // 国家队监控：盘中每 60 秒自动刷新（预警器需要实时性）
+  useEffect(() => {
+    if (currentStrategy !== 'nationalTeam') return;
+    const timer = setInterval(() => {
+      fetchData();
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, [currentStrategy]);
+
   const isOversoldMode = currentStrategy === 'oversold';
   const isMeanReversionMode = currentStrategy === 'meanReversion';
   const isMa200TrendMode = currentStrategy === 'ma200Trend';
   const isCybDividendMode = currentStrategy === 'cybDividend';
+  const isNationalTeamMode = currentStrategy === 'nationalTeam';
 
   // 数据就绪性：readyStrategy 必须与当前策略一致，否则视为未就绪。
   // 这样切回任何策略都不会复用到上一轮的旧对象（残留的根因）。
   const isReady = readyStrategy === currentStrategy;
 
   // 按策略绑定的数据视图：未就绪时一律为 null，渲染层拿不到旧数据。
-  const rotationView = isReady && !isMa200TrendMode && !isMeanReversionMode && !isOversoldMode && !isCybDividendMode ? rotationData : null;
+  const rotationView = isReady && !isMa200TrendMode && !isMeanReversionMode && !isOversoldMode && !isCybDividendMode && !isNationalTeamMode ? rotationData : null;
   const oversoldView = isReady && isOversoldMode ? oversoldData : null;
   const meanReversionView = isReady && isMeanReversionMode ? meanReversionData : null;
   const ma200TrendView = isReady && isMa200TrendMode ? ma200TrendData : null;
   const cybDividendView = isReady && isCybDividendMode ? cybDividendData : null;
+  const nationalTeamView = isReady && isNationalTeamMode ? nationalTeamData : null;
 
-  const currentData = cybDividendView || ma200TrendView || meanReversionView || oversoldView || rotationView;
+  const currentData = nationalTeamView || cybDividendView || ma200TrendView || meanReversionView || oversoldView || rotationView;
 
   // 当前策略数据尚未就绪时，一律显示骨架屏（即使 loading 已为 false）
   const showSkeleton = loading || !isReady || !currentData;
@@ -839,7 +855,7 @@ export default function ETFRotationPage() {
             <div>
               <h1 className="text-xl font-bold text-slate-800">ETF轮动策略</h1>
               <p className="text-xs text-slate-400">
-                {isCybDividendMode ? '市场情绪' : isMa200TrendMode ? '美股MA200趋势' : isMeanReversionMode ? '均值回归' : isOversoldMode ? '超跌策略' : '趋势轮动'}
+                {isNationalTeamMode ? '国家队监控' : isCybDividendMode ? '市场情绪' : isMa200TrendMode ? '美股MA200趋势' : isMeanReversionMode ? '均值回归' : isOversoldMode ? '超跌策略' : '趋势轮动'}
               </p>
             </div>
             
@@ -854,6 +870,7 @@ export default function ETFRotationPage() {
                   <SelectItem value="oversold">超跌策略</SelectItem>
                   <SelectItem value="ma200Trend">美股MA200</SelectItem>
                   <SelectItem value="cybDividend">市场情绪</SelectItem>
+                  <SelectItem value="nationalTeam">国家队监控</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -934,6 +951,27 @@ export default function ETFRotationPage() {
                         );
                       })()}
                     </div>
+                  ) : isNationalTeamMode ? (
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-5 h-5 text-emerald-500" />
+                      <span className="text-sm font-medium text-slate-700">
+                        放量异动
+                      </span>
+                      <span className={`text-sm font-bold ${
+                        (nationalTeamView?.data.summary.strongCount ?? 0) > 0
+                          ? 'text-red-600'
+                          : (nationalTeamView?.data.summary.alertCount ?? 0) > 0
+                          ? 'text-orange-600'
+                          : 'text-slate-600'
+                      }`}>
+                        {nationalTeamView
+                          ? `${nationalTeamView.data.summary.strongCount} 显著 / ${nationalTeamView.data.summary.alertCount} 放量`
+                          : '-'}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {nationalTeamView?.data.marketStatus || ''}
+                      </span>
+                    </div>
                   ) : isCybDividendMode ? (
                     <div className="flex items-center gap-2">
                       <Shield className="w-5 h-5 text-emerald-500" />
@@ -1009,6 +1047,28 @@ export default function ETFRotationPage() {
                       <span className="font-medium text-slate-600">注意 1.06~1.14 是「滞回带」：区间内不产生任何交易，持什么就继续持什么。</span>
                       <br />
                       同样一个 ratio 落在区间里，空仓者会买 TQQQ，持 QQQ 者却仍持 QQQ —— 结果只取决于你上一交易日拿着什么。
+                    </p>
+                  </div>
+                ) : isNationalTeamMode ? (
+                  <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1">
+                    <p className="font-medium text-slate-700 mb-1">预警规则：量比 = 今日累计成交量 ÷ 近5日同一时刻平均量</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="bg-red-50 rounded p-2">
+                        <p className="font-medium text-red-600 text-xs">≥ 2.0x 显著放量</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">多只同时出现<br/>更值得关注</p>
+                      </div>
+                      <div className="bg-orange-50 rounded p-2">
+                        <p className="font-medium text-orange-600 text-xs">1.5x ~ 2.0x 放量</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">观察是否持续<br/>是否伴随急跌</p>
+                      </div>
+                      <div className="bg-slate-100 rounded p-2">
+                        <p className="font-medium text-slate-600 text-xs">&lt; 1.5x 正常</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">无信号<br/>不构成任何操作建议</p>
+                      </div>
+                    </div>
+                    <p className="text-slate-500 text-[11px] pt-1.5 leading-relaxed">
+                      <span className="font-medium text-slate-600">本卡片只是预警器：</span>
+                      放量 ≠ 国家队入场，也可能是套利/做市/调仓。请结合盘中走势与消息面自行二次判断。
                     </p>
                   </div>
                 ) : isCybDividendMode ? (
@@ -1110,6 +1170,8 @@ export default function ETFRotationPage() {
               <h2 className="text-sm font-medium text-slate-500 mb-3">
                 {isMa200TrendMode
                   ? '美股 QQQ / TQQQ'
+                  : isNationalTeamMode
+                  ? '宽基 ETF 放量监控'
                   : isCybDividendMode
                   ? '创业板指 / 中证红利'
                   : isMeanReversionMode
@@ -1122,6 +1184,14 @@ export default function ETFRotationPage() {
               {isMa200TrendMode ? (
                 ma200TrendView?.data ? (
                   <Ma200TrendCard data={ma200TrendView.data} />
+                ) : (
+                  <Card className="p-8 text-center border-slate-200">
+                    <p className="text-slate-500">暂无数据</p>
+                  </Card>
+                )
+              ) : isNationalTeamMode ? (
+                nationalTeamView?.data ? (
+                  <NationalTeamCard data={nationalTeamView.data} />
                 ) : (
                   <Card className="p-8 text-center border-slate-200">
                     <p className="text-slate-500">暂无数据</p>

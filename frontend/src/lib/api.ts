@@ -355,6 +355,74 @@ export function getCybDividendStrategy(): Promise<CybDividendResponse> {
   return fetchAPI<CybDividendResponse>('/api/strategy/cyb-dividend');
 }
 
+// ===== 国家队监控 =====
+
+export interface NationalTeamEtf {
+  symbol: string;
+  name: string;
+  date: string;
+  price: number | null;
+  /** 今日累计成交量（手） */
+  todayVolume: number;
+  /** 近5日同进度基准量（手） */
+  baseVolume: number | null;
+  /** 近20日同进度基准量（手） */
+  baseVolumeSlow: number | null;
+  /** 量比（vs 近5日基准） */
+  ratio: number | null;
+  /** 量比（vs 近20日基准，参考） */
+  ratioSlow: number | null;
+  /** 同时刻历史分位 0~1（参考） */
+  percentile: number | null;
+  state: string;
+  basis: string;
+  lastBar: string;
+  baseMode?: string;
+  baseNote?: string;
+  baseDays?: number;
+  baseDaysSlow?: number;
+  error?: string;
+}
+
+export interface NationalTeamGroup {
+  index: string;
+  state: string;
+  avgRatio: number | null;
+  alertCount: number;
+  strongCount: number;
+  totalCount: number;
+  etfs: NationalTeamEtf[];
+}
+
+export interface NationalTeamResponse {
+  code: number;
+  message: string;
+  data: {
+    summary: {
+      strongCount: number;
+      alertCount: number;
+      totalCount: number;
+      maxRatio: number | null;
+      avgRatio: number | null;
+    };
+    groups: NationalTeamGroup[];
+    thresholds: { alert: number; strong: number };
+    params: { baseDaysFast: number; baseDaysSlow: number; minBaseDays: number };
+    progress: number;
+    usedMinutes: number;
+    inSession: boolean;
+    marketStatus: string;
+    quoteDate: string | null;
+    timestamp: string;
+    dataSource: string;
+    costMs: number;
+  };
+}
+
+export function getNationalTeam(): Promise<NationalTeamResponse> {
+  return fetchAPI<NationalTeamResponse>('/api/strategy/national-team');
+}
+
 // ETF配置相关API
 export interface EtfConfig {
   id: number;
