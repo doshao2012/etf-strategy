@@ -45,7 +45,12 @@ __pycache__/
 
 # 历史数据同步的运行元信息（本地状态，不入库）
 qqq_history_meta.json
+# 策略运行时缓存（本地状态，不入库）
 backend/cyb_dividend_cache.json
+backend/history_cache.json
+backend/kline_cache.json
+backend/qqq_history.json
+backend/volume_cache.json
 
 # 中证官方 PE 累积库（每天抓取自增长，属运行时状态，不入库）
 backend/csindex_pe_history.json
