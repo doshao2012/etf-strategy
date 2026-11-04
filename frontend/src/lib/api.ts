@@ -446,6 +446,8 @@ export interface NationalTeamResponse {
     quoteDate: string | null;
     /** 份额数据最新日期 YYYYMMDD */
     shareAsOf: string | null;
+    /** 份额数据最早日期 YYYYMMDD（沪深披露时点不同，两端会差一天） */
+    shareAsOfMin?: string | null;
     /** 份额历史累积天数 */
     shareDays: number | null;
     timestamp: string;

@@ -70,6 +70,13 @@ function asOfText(d: string | null | undefined) {
   return `${d.slice(4, 6)}-${d.slice(6, 8)}`;
 }
 
+// 沪深披露时点不同（沪 T 日盘后、深 T+1 傍晚），两端日期不一致时显示成区间
+function asOfRange(min: string | null | undefined, max: string | null | undefined) {
+  if (!max) return '';
+  if (!min || min === max) return `${asOfText(max)} 份额`;
+  return `${asOfText(min)}~${asOfText(max)} 份额`;
+}
+
 function ratioText(r: number | null | undefined) {
   if (r === null || r === undefined) return '-';
   return `${r.toFixed(2)}x`;
@@ -239,7 +246,7 @@ function GroupBlock({ group, rankOffset }: { group: NationalTeamGroup; rankOffse
 /* ---------------- 主组件：汇总头 + 分组卡片列表 ---------------- */
 
 export default function NationalTeamCard({ data }: { data: Data }) {
-  const { summary, groups, marketStatus, timestamp, shareAsOf, shareDays } = data;
+  const { summary, groups, marketStatus, timestamp, shareAsOf, shareAsOfMin, shareDays } = data;
 
   return (
     <div>
@@ -270,7 +277,7 @@ export default function NationalTeamCard({ data }: { data: Data }) {
               净申购 {summary.netInflowCount} / 净赎回 {summary.netOutflowCount}
             </span>
             <span className="ml-auto text-[9px] text-slate-400 tabular-nums" title={`覆盖 ${summary.netCount} 只`}>
-              {shareAsOf ? `${asOfText(shareAsOf)} 份额` : ''}
+              {asOfRange(shareAsOfMin, shareAsOf)}
               {shareDays ? ` · 累积 ${shareDays} 日` : ''}
             </span>
           </div>

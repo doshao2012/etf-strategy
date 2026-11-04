@@ -742,10 +742,11 @@ def main():
     # 绝不影响量比主逻辑（份额源不可用是很常见的，深交所站点尤其不稳）。
     share_map = {}
     share_asof = None
+    share_asof_min = None
     share_days = None
     try:
         import etf_share_flow as _sf
-        payload = _sf.ensure_history([s for s, _ in symbols])
+        payload = _sf.ensure_history([s for s, _ in symbols], allow_backfill=False)
         # 价格序列：用批量行情里的现价做最后一日，历史日从日线补（只对 sh 有全量历史）
         warnings_off = True
         for s, _ in symbols:
@@ -759,6 +760,9 @@ def main():
         if share_map:
             asofs = [v.get('asOf') for v in share_map.values() if v.get('asOf')]
             share_asof = max(asofs) if asofs else None
+            # 沪深披露时点不同：上交所 T 日盘后就有，深交所 T+1 傍晚才更新，
+            # 所以同一次监控里两端 asOf 会差一天，单独给出最早那天，前端显示成区间。
+            share_asof_min = min(asofs) if asofs else None
             ds = [v.get('days') for v in share_map.values() if v.get('days')]
             share_days = max(ds) if ds else None
         _log(f'净申赎 {len(share_map)} 只，asOf={share_asof}')
@@ -859,6 +863,7 @@ def main():
             'marketStatus': status,
             'quoteDate': flat[0].get('date') if flat else None,
             'shareAsOf': share_asof,
+            'shareAsOfMin': share_asof_min,
             'shareDays': share_days,
             'timestamp': now.strftime('%Y-%m-%d %H:%M:%S'),
             'dataSource': '腾讯分时累计成交额(minute/query) + 新浪30分钟额基准(sina kline)',
