@@ -38,6 +38,7 @@ import sys
 import os
 import json
 import time
+import concurrent.futures as _fut
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -65,7 +66,14 @@ TAIL_SWITCH = '14:45'      # 这个时间之后改用全天量比
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 CACHE_FILE = os.path.join(CACHE_DIR, 'national_team_cache.json')
 MINUTE_TTL = 55            # 实时分时缓存秒数（盘中）
-BASE_TTL = 4 * 3600        # 历史基准缓存秒数
+# 历史基准按「日」缓存，不按小时。
+# 基准是「近 N 日的 30 分钟 bar 累计额」，一天只变一次（收盘后），盘中完全不变；
+# 原来设 4 小时 TTL，盘中会整批过期一次、18 只同时重拉新浪，白白慢几秒。
+# 现在只要 date 是今天且已落盘，就直接复用——和超跌/轮动策略一样吃本地缓存。
+BASE_TTL = 24 * 3600
+# 并发拉取线程数。18 只标的之间毫无依赖，串行纯粹是排队等网络：
+# 单只约 440ms（分时 + 基准两个请求），串行 18 只 ≈ 6.6s，并发后 ≈ 0.9s。
+MAX_WORKERS = 10
 
 # ============== 网络 ==============
 CONNECT_TIMEOUT = 2.5
@@ -78,6 +86,8 @@ HEADERS = {
 # 腾讯：当日 1 分钟分时（[累计量(手), 累计额(元)]）+ 日线兜底
 TX_MINUTE = 'https://proxy.finance.qq.com/ifzqgtimg/appstock/app/minute/query?code={}'
 TX_DAY = 'https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get?param={},day,,,{},qfq'
+# 腾讯：批量行情（一次请求多只，主数据路径）
+TX_QUOTE_BATCH = 'https://qt.gtimg.cn/q='
 
 # 新浪：30 分钟 K 线，自带 amount（元）。
 # 这是唯一能拿到分钟级成交额的免费源（腾讯 m30 没有 amount 字段）。
@@ -250,8 +260,60 @@ def _get_json(url):
     return r.json()
 
 
+def fetch_quotes_batch(symbols):
+    """批量行情：一次请求拿全部标的的现价/涨跌/成交额。
+
+    https://qt.gtimg.cn/q=sh510300,sz159915,...  返回 GBK 文本，每行一只。
+
+    字段（~ 分隔）：
+        [1] 名称   [3] 现价   [4] 昨收   [32] 涨跌幅%
+        [33] 最高  [34] 最低   [36] 成交量(手)  [37] 成交额(万元)
+        [30] 报价时间 YYYYMMDDHHMMSS
+
+    这是本策略的主数据路径：18 只标的 1 个请求搞定，替代原来 18 次
+    minute/query（一次只能查一只）。已验证 [37] 与分时累计额完全一致
+    （沪深300ETF：1,256,222 万 = 125.62 亿）。
+
+    返回 {symbol: {'price','prevClose','changePct','amount','volume','quoteTime'}}
+    """
+    out = {}
+    if not symbols:
+        return out
+    url = TX_QUOTE_BATCH + ','.join(symbols)
+    r = requests.get(url, headers=HEADERS, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+    r.encoding = 'gbk'
+    if r.status_code != 200:
+        raise RuntimeError(f'批量行情 HTTP {r.status_code}')
+    for line in r.text.strip().split('\n'):
+        if '="' not in line:
+            continue
+        head, body = line.split('="', 1)
+        symbol = head.replace('v_', '').strip()
+        fields = body.rstrip('";').split('~')
+        if len(fields) < 38:
+            continue
+
+        def _f(idx):
+            try:
+                return float(fields[idx])
+            except (TypeError, ValueError, IndexError):
+                return None
+
+        amt_wan = _f(37)
+        out[symbol] = {
+            'name': fields[1],
+            'price': _f(3),
+            'prevClose': _f(4),
+            'changePct': _f(32),
+            'volume': _f(36),
+            'amount': amt_wan * 1e4 if amt_wan is not None else None,   # 万元 → 元
+            'quoteTime': fields[30] if len(fields) > 30 else '',
+        }
+    return out
+
+
 def fetch_minute(symbol):
-    """当日 1 分钟分时。
+    """当日 1 分钟分时（兜底用：批量行情失败时才走这里）。
 
     返回 (日期'YYYY-MM-DD', [(HHMM, 价, 累计量手, 累计额元), ...], 涨跌幅%, 昨收价)
 
@@ -386,6 +448,16 @@ def build_base(m30_bars):
     total = cum['1500']
     if total <= 0:
         return None
+
+    # 逐日累计序列（每项是 8 个锚点的累计额），供历史分位直接复用，
+    # 避免算分位时再拉一遍新浪数据。
+    day_cum = []
+    for d in slow_days:
+        row = []
+        for i, s in enumerate(SLOTS):
+            row.append(sum(by_day[d][x] for x in SLOTS[:i + 1]))
+        day_cum.append(row)
+
     return {
         'cumMedian': cum,
         'cumSlow': cum_slow,
@@ -394,6 +466,7 @@ def build_base(m30_bars):
         'totalSlow': cum_slow['1500'],
         'days': len(fast_days),
         'daysSlow': len(slow_days),
+        'dayCum': day_cum,
     }
 
 
@@ -445,31 +518,47 @@ def _percentile(values, x):
     return (below + 0.5 * equal) / n
 
 
-def analyze_one(symbol, name, now, minute_cache, base_cache):
-    """算一只 ETF 的量比。返回结果 dict。"""
+def analyze_one(symbol, name, now, quotes, minute_cache, base_cache):
+    """算一只 ETF 的量比。返回结果 dict。
+
+    quotes: fetch_quotes_batch() 的批量结果（主路径，缺这一项时才回落到单只分时）。
+    """
     today = now.strftime('%Y-%m-%d')
 
-    # ---- 实时分时（带缓存）----
-    mk = minute_cache.get(symbol)
-    if not mk or time.time() - mk.get('ts', 0) > MINUTE_TTL:
-        try:
-            date, points, chg, prev = fetch_minute(symbol)
-            mk = {'ts': time.time(), 'date': date, 'points': points,
-                  'changePct': chg, 'prevClose': prev}
-            minute_cache[symbol] = mk
-        except Exception as e:
-            _log(f'{symbol} 分时失败: {type(e).__name__}: {e}')
-            if not mk:
-                return {'symbol': symbol, 'name': name, 'state': '数据不足',
-                        'error': f'分时获取失败: {type(e).__name__}'}
-    date = mk.get('date') or today
-    points = mk.get('points') or []
+    q = quotes.get(symbol) or {}
+    date = today
+    price = q.get('price')
+    today_cum = q.get('amount') or 0.0        # 累计成交额（元）
+    change_pct = q.get('changePct')
+    prev_close = q.get('prevClose')
+    last_hhmm = ''
+    qt = q.get('quoteTime') or ''
+    if len(qt) >= 12:
+        last_hhmm = qt[8:12]
+        date = f'{qt[:4]}-{qt[4:6]}-{qt[6:8]}'
 
-    price = points[-1][1] if points else None
-    today_cum = points[-1][3] if points else 0.0        # 累计成交额（元）
-    last_hhmm = points[-1][0] if points else ''
-    change_pct = mk.get('changePct')
-    prev_close = mk.get('prevClose')
+    # ---- 批量行情没拿到这只时，才单独拉分时（兜底，走缓存）----
+    if not q or today_cum <= 0:
+        mk = minute_cache.get(symbol)
+        if not mk or time.time() - mk.get('ts', 0) > MINUTE_TTL:
+            try:
+                d, points, chg, prev = fetch_minute(symbol)
+                mk = {'ts': time.time(), 'date': d, 'points': points,
+                      'changePct': chg, 'prevClose': prev}
+                minute_cache[symbol] = mk
+            except Exception as e:
+                _log(f'{symbol} 分时兜底失败: {type(e).__name__}: {e}')
+                if not mk:
+                    return {'symbol': symbol, 'name': name, 'state': '数据不足',
+                            'error': f'行情获取失败: {type(e).__name__}'}
+        points = mk.get('points') or []
+        date = mk.get('date') or today
+        if points:
+            price = points[-1][1]
+            today_cum = points[-1][3]
+            last_hhmm = points[-1][0]
+        change_pct = mk.get('changePct')
+        prev_close = mk.get('prevClose')
 
     # ---- 基准（按日缓存）----
     bk = base_cache.get(symbol)
@@ -533,16 +622,16 @@ def analyze_one(symbol, name, now, minute_cache, base_cache):
     r_slow = today_cum / base_vol_slow if base_vol_slow > 0 else None
 
     # ---- 同进度历史分位（近20日逐日复算，参考数字，不参与判定）----
+    # 直接用建基准时就已算好的逐日累计序列，不再第二次拉新浪。
+    # （原来这里会重新 fetch 一遍全量 bar，每只多花 ~100ms，18 只就是 1.8 秒）
     pct = None
     if base.get('mode') == 'm30':
         hist_ratios = []
-        by_day = {}
-        for day, hhmm, vol in _base_bars_cache(symbol, base_cache):
-            by_day.setdefault(day, {})[hhmm] = vol
-        for d, m in by_day.items():
-            if len(m) < 8:
-                continue
-            acc = sum(m[s] for s in SLOTS if _minutes(f'{s[:2]}:{s[2:]}') <= now_min)
+        for day_acc in base.get('dayCum') or []:
+            acc = 0.0
+            for i, s in enumerate(SLOTS):
+                if _minutes(f'{s[:2]}:{s[2:]}') <= now_min:
+                    acc = day_acc[i]
             b = base_vol_slow if base_vol_slow > 0 else base_vol
             if b > 0:
                 hist_ratios.append(acc / b)
@@ -605,19 +694,40 @@ def main():
     minute_cache = cache.get('minute') or {}
     base_cache = cache.get('base') or {}
 
+    symbols = [(s, n) for grp in WATCH_GROUPS for s, n in grp['etfs']]
+
+    # ---- 主路径：一次批量请求拿全部标的的现价/涨跌/成交额 ----
+    quotes = {}
+    try:
+        quotes = fetch_quotes_batch([s for s, _ in symbols])
+        _log(f'批量行情 {len(quotes)}/{len(symbols)} 只')
+    except Exception as e:
+        _log(f'批量行情失败，回落单只分时: {type(e).__name__}: {e}')
+
+    # ---- 并发计算：18 只标的互相独立，串行只是排队等网络 ----
+    def _work(pair):
+        symbol, name = pair
+        try:
+            return symbol, analyze_one(symbol, name, now, quotes,
+                                       minute_cache, base_cache)
+        except Exception as e:
+            _log(f'{symbol} 异常: {type(e).__name__}: {e}')
+            return symbol, {'symbol': symbol, 'name': name, 'state': '数据不足',
+                            'error': str(e)[:120]}
+
+    rows_by_symbol = {}
+    with _fut.ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
+        for symbol, row in ex.map(_work, symbols):
+            rows_by_symbol[symbol] = row
+
     groups_out = []
     flat = []
     for grp in WATCH_GROUPS:
-        items = []
-        for symbol, name in grp['etfs']:
-            try:
-                row = analyze_one(symbol, name, now, minute_cache, base_cache)
-            except Exception as e:
-                _log(f'{symbol} 异常: {type(e).__name__}: {e}')
-                row = {'symbol': symbol, 'name': name, 'state': '数据不足',
-                       'error': str(e)[:120]}
-            items.append(row)
-            flat.append(row)
+        # 按 WATCH_GROUPS 原顺序取回，组内顺序稳定
+        items = [rows_by_symbol.get(s) or {
+            'symbol': s, 'name': n, 'state': '数据不足', 'error': '未返回'}
+            for s, n in grp['etfs']]
+        flat.extend(items)
 
         n_strong = sum(1 for x in items if x.get('state') == '显著放量')
         n_alert = sum(1 for x in items if x.get('state') in ('显著放量', '放量'))
