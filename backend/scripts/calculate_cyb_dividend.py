@@ -204,25 +204,27 @@ def build():
     if len(common) < 30:
         return {'code': 500, 'message': f'两指数共同交易日过少（{len(common)}）'}
 
-    # 实时价：仅当交易日与最新K线一致时，覆盖最后一个点（避免用盘中价污染历史）
+    # 实时价：与「K线最后一天」比日期，而不是与服务器时钟比。
+    # 腾讯 quoteTime 是北京时间，生产服务器是 UTC —— 北京 0~8 点时两边日期不同，
+    # 旧的「rt_date == 服务器today」判断会整段拒绝并入，页面就停在上一个交易日。
+    # 规则：报价日 > K线末日 → 追加实时点；相等 → 覆盖盘中K线；更旧 → 忽略。
     rt = fetch_realtime_batch()
     rt_growth = rt.get(GROWTH_SYMBOL)
     rt_div = rt.get(DIVIDEND_SYMBOL)
     live_used = False
     if rt_growth and rt_div:
-        today_str = datetime.now().strftime('%Y-%m-%d')
-        rt_date = (f'{rt_growth["quoteTime"][:4]}-{rt_growth["quoteTime"][4:6]}-'
-                   f'{rt_growth["quoteTime"][6:8]}') if len(rt_growth.get('quoteTime', '')) >= 8 else ''
-        # 腾讯的报价时间可能因时区/测试环境而超前，严格用"日期等于今天"来判断
-        if rt_date == today_str and common and common[-1] <= today_str:
-            growth_map[common[-1]] = rt_growth['price']
-            div_map[common[-1]] = rt_div['price']
+        qt = rt_growth.get('quoteTime', '')
+        rt_date = f'{qt[:4]}-{qt[4:6]}-{qt[6:8]}' if len(qt) >= 8 else ''
+        last_day = common[-1] if common else ''
+        if rt_date and last_day and rt_date >= last_day:
+            growth_map[rt_date] = rt_growth['price']
+            div_map[rt_date] = rt_div['price']
             live_used = True
-            _log(f'实时价已并入 {common[-1]}')
+            _log(f'实时价已并入 {rt_date}（K线末日 {last_day}）')
 
-    # 拼接序列
+    # 拼接序列（实时点可能比K线新一天，用并集重排）
     series = []
-    for day in common:
+    for day in sorted(set(growth_map) & set(div_map)):
         g = growth_map[day]
         d = div_map[day]
         if not d:
@@ -511,7 +513,11 @@ def _fetch_index_pe_now(symbol):
     pe = float(f[39])
     if pe <= 0:
         raise RuntimeError(f'{symbol} PE非正数')
-    return pe
+    # quoteTime 是北京时间，用它决定实时点归属哪一天，
+    # 不能用服务器本地时钟（生产是 UTC，北京 0~8 点两边日期差一天）
+    qt = f[30] if len(f) > 30 else ''
+    quote_day = f'{qt[:4]}-{qt[4:6]}-{qt[6:8]}' if len(qt) >= 8 else ''
+    return pe, quote_day
 
 
 def _fetch_jq_pe(jq_code, years=SPREAD_YEARS + 1):
@@ -663,19 +669,25 @@ def build_spread():
             if not pe_series:
                 continue
 
-            # --- 3) 腾讯实时 PE 覆盖当日（仅对腾讯有行情的指数）---
+            # --- 3) 腾讯实时 PE 覆盖/追加最新一天（仅对腾讯有行情的指数）---
             stale_days = 0
             if tx_symbol:
                 try:
-                    live_pe = _fetch_index_pe_now(tx_symbol)
-                    today = date.today().strftime('%Y-%m-%d')
-                    # 用实时 PE 覆盖（或新增）今天这一条
-                    pe_series = [p for p in pe_series if p['day'] != today]
-                    pe_series.append({'day': today, 'pe': live_pe})
-                    pe_series.sort(key=lambda x: x['day'])
-                    source = '韭圈儿历史 + 腾讯实时'
-                    live = True
-                    _log(f'{name} 实时PE {live_pe} 覆盖 {today}')
+                    live_pe, quote_day = _fetch_index_pe_now(tx_symbol)
+                    if quote_day:
+                        last_pe_day = pe_series[-1]['day']
+                        if quote_day < last_pe_day:
+                            # 报价早于序列末日（开盘前旧报价）：不并入
+                            _log(f'{name} 实时报价日 {quote_day} 早于序列末日 {last_pe_day}，跳过')
+                        else:
+                            pe_series = [p for p in pe_series if p['day'] != quote_day]
+                            pe_series.append({'day': quote_day, 'pe': live_pe})
+                            pe_series.sort(key=lambda x: x['day'])
+                            source = '韭圈儿历史 + 腾讯实时'
+                            live = True
+                            _log(f'{name} 实时PE {live_pe} 并入 {quote_day}（序列末日 {last_pe_day}）')
+                    else:
+                        raise RuntimeError('报价无时间戳')
                 except Exception as e:
                     errors.append(f'{name} 腾讯实时失败: {str(e)[:40]}')
 
