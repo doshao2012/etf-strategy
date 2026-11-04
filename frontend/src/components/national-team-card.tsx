@@ -29,6 +29,47 @@ function amtText(v: number | null | undefined) {
   return `${yi.toFixed(2)} 亿`;
 }
 
+// 净申赎：带符号，小额也保留两位
+function netText(v: number | null | undefined) {
+  if (v === null || v === undefined) return '-';
+  const yi = v / 1e8;
+  const abs = Math.abs(yi);
+  const body = abs >= 100 ? abs.toFixed(0) : abs >= 10 ? abs.toFixed(1) : abs.toFixed(2);
+  return `${yi > 0 ? '+' : yi < 0 ? '-' : ''}${body} 亿`;
+}
+
+// 净申赎配色：净申购=红（资金进场），净赎回=绿（资金离场），A 股习惯
+function netCls(v: number | null | undefined) {
+  if (v === null || v === undefined) return 'text-slate-400';
+  return v > 0 ? 'text-red-500' : v < 0 ? 'text-emerald-600' : 'text-slate-500';
+}
+
+function netCellCls(v: number | null | undefined) {
+  if (v === null || v === undefined) return 'bg-slate-50 text-slate-400';
+  return v > 0 ? 'bg-red-50 text-red-600' : v < 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-50 text-slate-500';
+}
+
+// 分位：申购强度越高越红；净赎回一侧走绿色
+function pctOfNetText(p: number | null | undefined) {
+  if (p === null || p === undefined) return '-';
+  return `${Math.round(p * 100)}%`;
+}
+
+function pctOfNetCls(p: number | null | undefined, net: number | null | undefined) {
+  if (p === null || p === undefined) return 'text-slate-400';
+  const isInflow = (net ?? 0) >= 0;
+  if (p >= 0.9) return isInflow ? 'text-red-600 font-bold' : 'text-emerald-600 font-bold';
+  if (p >= 0.7) return isInflow ? 'text-red-500' : 'text-emerald-500';
+  if (p <= 0.1) return isInflow ? 'text-red-400' : 'text-emerald-700 font-bold';
+  return 'text-slate-500';
+}
+
+// 份额日期 YYYYMMDD → MM-DD
+function asOfText(d: string | null | undefined) {
+  if (!d || d.length !== 8) return '';
+  return `${d.slice(4, 6)}-${d.slice(6, 8)}`;
+}
+
 function ratioText(r: number | null | undefined) {
   if (r === null || r === undefined) return '-';
   return `${r.toFixed(2)}x`;
@@ -85,8 +126,8 @@ function EtfCard({ etf, rank }: { etf: NationalTeamEtf; rank: number }) {
           </div>
         </div>
 
-        {/* 核心指标：四宫格（现价 / 今日成交额 / 量比 / 涨跌幅） */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+        {/* 二级市场指标：四宫格（现价 / 涨跌幅 / 成交额 / 量比） */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
           <div className="bg-slate-50 rounded-lg p-3 text-center">
             <p className="text-xs text-slate-500 mb-1">现价</p>
             <p className="text-xl font-bold text-slate-700 tabular-nums">
@@ -111,6 +152,45 @@ function EtfCard({ etf, rank }: { etf: NationalTeamEtf; rank: number }) {
           </div>
         </div>
 
+        {/* 一级市场：净申赎（份额口径，T+1 披露）。与上方量比是两条独立证据线 */}
+        <div className="rounded-lg ring-1 ring-slate-200 bg-white overflow-hidden mb-2">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 border-b border-slate-100">
+            <span className="text-[10px] font-medium text-slate-500">一级市场净申赎</span>
+            {etf.netAsOf && (
+              <span className="text-[9px] text-slate-400 tabular-nums">{asOfText(etf.netAsOf)} 份额</span>
+            )}
+            <span className="ml-auto text-[9px] text-slate-300">T+1 披露 · 非实时</span>
+          </div>
+          {etf.netAmount === null || etf.netAmount === undefined ? (
+            <div className="px-2.5 py-2 text-[10px] text-slate-400">
+              {etf.netNote || '暂无份额数据'}
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 divide-x divide-slate-100">
+              <div className="px-2 py-1.5 text-center">
+                <p className="text-[9px] text-slate-400 mb-0.5">当日</p>
+                <p className={`text-sm font-bold tabular-nums ${netCls(etf.netAmount)}`}>
+                  {netText(etf.netAmount)}
+                </p>
+              </div>
+              <div className="px-2 py-1.5 text-center">
+                <p className="text-[9px] text-slate-400 mb-0.5">近5日累计</p>
+                <p className={`text-sm font-bold tabular-nums ${netCls(etf.net5Amount)}`}>
+                  {netText(etf.net5Amount)}
+                </p>
+              </div>
+              <div className="px-2 py-1.5 text-center">
+                <p className="text-[9px] text-slate-400 mb-0.5">
+                  分位{etf.netDays ? `(${etf.netDays}日)` : ''}
+                </p>
+                <p className={`text-sm font-bold tabular-nums ${pctOfNetCls(etf.netPercentile, etf.netAmount)}`}>
+                  {pctOfNetText(etf.netPercentile)}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* 参考指标：20日基准量比 + 历史分位 */}
         <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
           <div className="flex items-center gap-1.5">
@@ -118,7 +198,7 @@ function EtfCard({ etf, rank }: { etf: NationalTeamEtf; rank: number }) {
             <span className="font-semibold text-slate-700 tabular-nums">{ratioText(etf.ratioSlow)}</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-slate-500">同时刻分位</span>
+            <span className="text-slate-500">成交额分位</span>
             <span className="font-semibold text-slate-700 tabular-nums">{pctText(etf.percentile)}</span>
           </div>
           <span className="text-slate-400 text-[10px]">
@@ -159,12 +239,12 @@ function GroupBlock({ group, rankOffset }: { group: NationalTeamGroup; rankOffse
 /* ---------------- 主组件：汇总头 + 分组卡片列表 ---------------- */
 
 export default function NationalTeamCard({ data }: { data: Data }) {
-  const { summary, groups, marketStatus, timestamp } = data;
+  const { summary, groups, marketStatus, timestamp, shareAsOf, shareDays } = data;
 
   return (
     <div>
       {/* 更新时间（放量状态与规则说明已在页面顶部汇总卡里，这里不重复） */}
-      <div className="flex items-center justify-between mb-3 px-1">
+      <div className="flex items-center justify-between mb-2 px-1">
         <span className="text-sm font-medium text-slate-500">
           放量 {summary.alertCount + summary.strongCount} / {summary.totalCount} · {marketStatus}
         </span>
@@ -172,6 +252,30 @@ export default function NationalTeamCard({ data }: { data: Data }) {
           {timestamp.slice(5, 16)} 更新
         </span>
       </div>
+
+      {/* 一级市场合计：全样本当日与近 5 日净申赎 */}
+      {summary.netTotal !== null && summary.netTotal !== undefined && (
+        <div className="mb-3 mx-1 rounded-lg bg-gradient-to-r from-slate-50 to-white ring-1 ring-slate-200 px-3 py-2">
+          <div className="flex items-center flex-wrap gap-x-3 gap-y-1">
+            <span className="text-[10px] font-medium text-slate-500">一级市场合计净申赎</span>
+            <span className={`text-sm font-bold tabular-nums ${netCls(summary.netTotal)}`}>
+              {netText(summary.netTotal)}
+            </span>
+            {summary.netTotal5 !== null && (
+              <span className="text-[10px] text-slate-400">
+                近5日 <span className={`font-semibold tabular-nums ${netCls(summary.netTotal5)}`}>{netText(summary.netTotal5)}</span>
+              </span>
+            )}
+            <span className="text-[10px] text-slate-400">
+              净申购 {summary.netInflowCount} / 净赎回 {summary.netOutflowCount}
+            </span>
+            <span className="ml-auto text-[9px] text-slate-400 tabular-nums" title={`覆盖 ${summary.netCount} 只`}>
+              {shareAsOf ? `${asOfText(shareAsOf)} 份额` : ''}
+              {shareDays ? ` · 累积 ${shareDays} 日` : ''}
+            </span>
+          </div>
+        </div>
+      )}
 
       {groups.map((g, gi) => {
         const rankOffset = groups.slice(0, gi).reduce((n, x) => n + x.etfs.length, 0);

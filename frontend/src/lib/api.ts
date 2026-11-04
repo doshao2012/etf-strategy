@@ -386,6 +386,19 @@ export interface NationalTeamEtf {
   baseDays?: number;
   baseDaysSlow?: number;
   error?: string;
+
+  /** 一级市场最新一日净申赎金额（元，正=净申购，负=净赎回）。份额 T+1 披露 */
+  netAmount?: number | null;
+  /** 近 5 日累计净申赎金额（元） */
+  net5Amount?: number | null;
+  /** 净申赎在一级市场近 60 日中的分位 0~1（0.95 = 申购强度超过历史 95% 的交易日） */
+  netPercentile?: number | null;
+  /** 净申赎对应的份额日期 YYYYMMDD */
+  netAsOf?: string | null;
+  /** 实际参与分位计算的交易日数 */
+  netDays?: number | null;
+  /** 数据不足时的说明（如深市需累积） */
+  netNote?: string;
 }
 
 export interface NationalTeamGroup {
@@ -408,15 +421,33 @@ export interface NationalTeamResponse {
       totalCount: number;
       maxRatio: number | null;
       avgRatio: number | null;
+      /** 全样本合计净申赎（元，正=净申购） */
+      netTotal: number | null;
+      /** 全样本近 5 日累计净申赎（元） */
+      netTotal5: number | null;
+      netInflowCount: number;
+      netOutflowCount: number;
+      /** 有净申赎数据的标的数（深市可能为 0） */
+      netCount: number;
     };
     groups: NationalTeamGroup[];
     thresholds: { alert: number; strong: number };
-    params: { baseDaysFast: number; baseDaysSlow: number; minBaseDays: number };
+    params: {
+      baseDaysFast: number;
+      baseDaysSlow: number;
+      minBaseDays: number;
+      netPctDays: number;
+      netMinDays: number;
+    };
     progress: number;
     usedMinutes: number;
     inSession: boolean;
     marketStatus: string;
     quoteDate: string | null;
+    /** 份额数据最新日期 YYYYMMDD */
+    shareAsOf: string | null;
+    /** 份额历史累积天数 */
+    shareDays: number | null;
     timestamp: string;
     dataSource: string;
     costMs: number;

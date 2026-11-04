@@ -397,6 +397,38 @@ def fetch_day_amount(symbol, n=25):
     return out
 
 
+def _day_close_map(symbol):
+    """近 90 个交易日的收盘价 {YYYYMMDD: close}，用于把份额变动换算成金额。
+
+    只用腾讯一条日线请求，带按日缓存（收盘价一天只变一次），
+    18 只标的首日各花 ~60ms，之后全部命中缓存。
+    """
+    today = bj_now().strftime('%Y%m%d')
+    hit = _DAY_CLOSE_CACHE.get(symbol)
+    if hit and hit.get('date') == today:
+        return hit['map']
+    out = {}
+    try:
+        j = _get_json(TX_DAY.format(symbol, 120))
+        node = (j.get('data') or {}).get(symbol) or {}
+        rows = node.get('qfqday') or node.get('day') or []
+        for row in rows:
+            if len(row) < 3:
+                continue
+            try:
+                out[str(row[0]).replace('-', '')] = float(row[2])   # [日期, 开, 收, ...]
+            except (TypeError, ValueError):
+                continue
+    except Exception as e:
+        _log(f'{symbol} 日线收盘失败: {type(e).__name__}: {e}')
+    if out:
+        _DAY_CLOSE_CACHE[symbol] = {'date': today, 'map': out}
+    return out
+
+
+_DAY_CLOSE_CACHE = {}
+
+
 # ======================================================================
 # 基准构建
 # ======================================================================
@@ -704,6 +736,35 @@ def main():
     except Exception as e:
         _log(f'批量行情失败，回落单只分时: {type(e).__name__}: {e}')
 
+    # ---- 一级市场净申赎（份额口径，T+1 披露）----
+    # 与量比完全独立的一条线：量比看二级市场成交，净申赎看一级市场真实申购赎回。
+    # 份额数据由 etf_share_flow 负责抓取/累积/回补，这里的失败一律降级为 None，
+    # 绝不影响量比主逻辑（份额源不可用是很常见的，深交所站点尤其不稳）。
+    share_map = {}
+    share_asof = None
+    share_days = None
+    try:
+        import etf_share_flow as _sf
+        payload = _sf.ensure_history([s for s, _ in symbols])
+        # 价格序列：用批量行情里的现价做最后一日，历史日从日线补（只对 sh 有全量历史）
+        warnings_off = True
+        for s, _ in symbols:
+            try:
+                pm = _day_close_map(s)
+                q = quotes.get(s) or {}
+                res = _sf.compute_one(payload, s, price_today=q.get('price'), price_map=pm)
+                share_map[s] = res
+            except Exception as e:
+                _log(f'{s} 净申赎计算失败: {type(e).__name__}: {e}')
+        if share_map:
+            asofs = [v.get('asOf') for v in share_map.values() if v.get('asOf')]
+            share_asof = max(asofs) if asofs else None
+            ds = [v.get('days') for v in share_map.values() if v.get('days')]
+            share_days = max(ds) if ds else None
+        _log(f'净申赎 {len(share_map)} 只，asOf={share_asof}')
+    except Exception as e:
+        _log(f'净申赎模块失败（降级为无数据）: {type(e).__name__}: {e}')
+
     # ---- 并发计算：18 只标的互相独立，串行只是排队等网络 ----
     def _work(pair):
         symbol, name = pair
@@ -727,6 +788,15 @@ def main():
         items = [rows_by_symbol.get(s) or {
             'symbol': s, 'name': n, 'state': '数据不足', 'error': '未返回'}
             for s, n in grp['etfs']]
+        # 挂上净申赎（一级市场份额口径，T+1 披露）
+        for it in items:
+            sf = share_map.get(it.get('symbol')) or {}
+            it['netAmount'] = round(sf['netAmount'], 0) if sf.get('netAmount') is not None else None
+            it['net5Amount'] = round(sf['net5Amount'], 0) if sf.get('net5Amount') is not None else None
+            it['netPercentile'] = sf.get('percentile')
+            it['netAsOf'] = sf.get('asOf')
+            it['netDays'] = sf.get('days')
+            it['netNote'] = sf.get('note') or ''
         flat.extend(items)
 
         n_strong = sum(1 for x in items if x.get('state') == '显著放量')
@@ -758,12 +828,19 @@ def main():
                                    -(g['avgRatio'] or 0)))
 
     ok_rows = [x for x in flat if x.get('ratio') is not None]
+    net_rows = [x for x in flat if x.get('netAmount') is not None]
     summary = {
         'strongCount': sum(1 for x in flat if x.get('state') == '显著放量'),
         'alertCount': sum(1 for x in flat if x.get('state') in ('显著放量', '放量')),
         'totalCount': len(flat),
         'maxRatio': round(max((x['ratio'] for x in ok_rows), default=0), 3) if ok_rows else None,
         'avgRatio': round(sum(x['ratio'] for x in ok_rows) / len(ok_rows), 3) if ok_rows else None,
+        # 一级市场：全样本合计净申赎（正=净申购）
+        'netTotal': round(sum(x['netAmount'] for x in net_rows), 0) if net_rows else None,
+        'netTotal5': round(sum(x['net5Amount'] for x in net_rows), 0) if net_rows else None,
+        'netInflowCount': sum(1 for x in net_rows if x['netAmount'] > 0),
+        'netOutflowCount': sum(1 for x in net_rows if x['netAmount'] < 0),
+        'netCount': len(net_rows),
     }
 
     progress, used_min, in_session = trade_progress(now)
@@ -774,12 +851,15 @@ def main():
             'groups': groups_out,
             'thresholds': {'alert': R_ALERT, 'strong': R_STRONG},
             'params': {'baseDaysFast': BASE_DAYS_FAST, 'baseDaysSlow': BASE_DAYS_SLOW,
-                       'minBaseDays': MIN_BASE_DAYS},
+                       'minBaseDays': MIN_BASE_DAYS,
+                       'netPctDays': 60, 'netMinDays': 20},
             'progress': round(progress, 4),
             'usedMinutes': used_min,
             'inSession': in_session,
             'marketStatus': status,
             'quoteDate': flat[0].get('date') if flat else None,
+            'shareAsOf': share_asof,
+            'shareDays': share_days,
             'timestamp': now.strftime('%Y-%m-%d %H:%M:%S'),
             'dataSource': '腾讯分时累计成交额(minute/query) + 新浪30分钟额基准(sina kline)',
             'costMs': int((time.time() - t0) * 1000),
