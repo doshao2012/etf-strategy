@@ -362,13 +362,17 @@ export interface NationalTeamEtf {
   name: string;
   date: string;
   price: number | null;
-  /** 今日累计成交量（手） */
-  todayVolume: number;
-  /** 近5日同进度基准量（手） */
-  baseVolume: number | null;
-  /** 近20日同进度基准量（手） */
-  baseVolumeSlow: number | null;
-  /** 量比（vs 近5日基准） */
+  /** 昨收价 */
+  prevClose: number | null;
+  /** 今日涨跌幅 %（红涨绿跌） */
+  changePct: number | null;
+  /** 今日累计成交额（元） */
+  todayAmount: number;
+  /** 近5日同进度基准成交额（元） */
+  baseAmount: number | null;
+  /** 近20日同进度基准成交额（元） */
+  baseAmountSlow: number | null;
+  /** 量比（vs 近5日基准，基于成交额） */
   ratio: number | null;
   /** 量比（vs 近20日基准，参考） */
   ratioSlow: number | null;

@@ -814,15 +814,6 @@ export default function ETFRotationPage() {
     loadConfigs();
   }, [currentStrategy]);
 
-  // 国家队监控：盘中每 60 秒自动刷新（预警器需要实时性）
-  useEffect(() => {
-    if (currentStrategy !== 'nationalTeam') return;
-    const timer = setInterval(() => {
-      fetchData();
-    }, 60_000);
-    return () => clearInterval(timer);
-  }, [currentStrategy]);
-
   const isOversoldMode = currentStrategy === 'oversold';
   const isMeanReversionMode = currentStrategy === 'meanReversion';
   const isMa200TrendMode = currentStrategy === 'ma200Trend';
