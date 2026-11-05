@@ -97,6 +97,15 @@ SINA_HEADERS = {
     'User-Agent': HEADERS['User-Agent'],
     'Referer': 'https://finance.sina.com.cn/',
 }
+# 新浪批量行情：腾讯 qt.gtimg.cn 不通时的第二源（例如某些机房到腾讯的链路被限）
+SINA_QUOTE = 'https://hq.sinajs.cn/list={}'
+
+# 报价新鲜度阈值（分钟）。盘中报价时间落后超过这个数，就不认为拿到的
+# "今日累计成交额"还是今天的——宁可显示「无数据」，也不能把 0 当成"没放量"。
+# 这个阈值存在的理由：2026-11-05 线上出现过分时接口从 09:30 起全部失败、
+# 页面却一路显示「今日成交额 0.00 亿 / 量比 0.00x / 状态：正常」的事故，
+# 看起来像"今天特别冷清"，实际是数据源断了，属于最坏的一种误导。
+QUOTE_STALE_MIN = 12
 
 # ============== 监控标的 ==============
 # 全部为日均成交额 10 亿以上的主流宽基 ETF，按跟踪指数分组。
@@ -310,6 +319,122 @@ def fetch_quotes_batch(symbols):
             'quoteTime': fields[30] if len(fields) > 30 else '',
         }
     return out
+
+
+def _parse_quote_time(s):
+    """'20261105161455' → naive 北京时间（与 bj_now() 同口径）。解析不了返回 None。"""
+    if not s or len(s) < 12:
+        return None
+    try:
+        return datetime.strptime(s[:14].ljust(14, '0'), '%Y%m%d%H%M%S')
+    except Exception:
+        return None
+
+
+def quote_stale_reason(now, quote_time):
+    """判断报价是否已经过期。返回 '' 表示新鲜，否则返回给人看的原因。
+
+    三种过期形态，线上都真实出现过：
+      1) 报价日期不是今天 —— 整段数据都是昨天的，最常见；
+      2) 盘中报价时间停住 —— 数据源中途挂了，值一直停在断点（11-05 事故就是这种：
+         从 09:30 起接口全失败，页面显示"今日成交额 0.00 亿、状态正常"）；
+      3) 收盘后报价还停在 15:00 之前 —— 说明收盘数据没送到。
+    """
+    dt = _parse_quote_time(quote_time)
+    if dt is None:
+        return '行情快照缺少时间戳'
+    status = market_status(now)
+    # 周末/盘前没有"今天的行情"这回事，最后交易日的数据就是最新数据
+    if status in ('休市', '未开盘'):
+        return '' if (now.date() - dt.date()).days <= 5 else f'行情停留在 {dt.strftime("%m-%d %H:%M")}'
+    if dt.date() < now.date():
+        return f'行情停留在 {dt.strftime("%m-%d %H:%M")}'
+    if dt > now + timedelta(minutes=3):
+        return ''          # 服务器时钟略快于行情源，不算过期
+    age = (now - dt).total_seconds() / 60
+    if status in ('交易中', '开盘观察中', '午休', '尾盘'):
+        if age > QUOTE_STALE_MIN:
+            return f'行情已 {age:.0f} 分钟未更新（停在 {dt.strftime("%H:%M")}）'
+        return ''
+    if status == '已收盘':
+        # 收盘后要求报价时间至少到 15:00，否则今天这根 K 线还没走完
+        if dt.strftime('%H%M') < '1500':
+            return f'行情停在 {dt.strftime("%H:%M")}，今日收盘数据未到'
+        return ''
+    return ''              # 其余状态不判过期
+
+
+def _fetch_sina_quotes(symbols):
+    """新浪批量行情（备用源）。一次请求拿全部标的。
+
+    https://hq.sinajs.cn/list=sh510300,sz159919
+    返回 GBK：var hq_str_sh510300="名称,今开,昨收,现价,最高,最低,...,成交量(股),成交额(元),...,日期,时间,状态";
+
+    和腾讯的差别：新浪给的是**股**和**元**（腾讯是手和万元），字段位置也不同，
+    所以单独解析、统一成同一套结构，上层完全无感。
+    """
+    out = {}
+    if not symbols:
+        return out
+    r = requests.get(SINA_QUOTE.format(','.join(symbols)), headers=SINA_HEADERS,
+                     timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+    r.encoding = 'gbk'
+    if r.status_code != 200:
+        raise RuntimeError(f'新浪行情 HTTP {r.status_code}')
+    for line in r.text.strip().split('\n'):
+        if 'hq_str_' not in line or '="' not in line:
+            continue
+        head, body = line.split('="', 1)
+        symbol = head.split('hq_str_')[-1].strip()
+        f = body.rstrip('";').split(',')
+        if len(f) < 32 or not f[0]:
+            continue
+
+        def _f(idx):
+            try:
+                return float(f[idx])
+            except (TypeError, ValueError, IndexError):
+                return None
+
+        price, prev = _f(3), _f(2)
+        chg = None
+        if price is not None and prev:
+            chg = (price / prev - 1) * 100
+        qt = (f[30].replace('-', '') + f[31].replace(':', '')) if f[30] else ''
+        out[symbol] = {
+            'name': f[0],
+            'price': price,
+            'prevClose': prev,
+            'changePct': chg,
+            'volume': _f(8),
+            'amount': _f(9),
+            'quoteTime': qt,
+        }
+    return out
+
+
+def fetch_quotes(symbols):
+    """取批量行情，返回 (quotes, 源名, 失败原因)。
+
+    两个源任一成功即返回；都失败返回 ({}, '', 原因)，由上层降级成"数据不足"，
+    **绝不静默退回 0**——0 会被前端读成"今天没成交"。
+    """
+    errs = []
+    try:
+        q = fetch_quotes_batch(symbols)
+        if q:
+            return q, '腾讯', ''
+        errs.append('腾讯返回空')
+    except Exception as e:
+        errs.append(f'腾讯 {type(e).__name__}: {str(e)[:70]}')
+    try:
+        q = _fetch_sina_quotes(symbols)
+        if q:
+            return q, '新浪', ''
+        errs.append('新浪返回空')
+    except Exception as e:
+        errs.append(f'新浪 {type(e).__name__}: {str(e)[:70]}')
+    return {}, '', '；'.join(errs)
 
 
 def fetch_minute(symbol):
@@ -553,7 +678,7 @@ def _percentile(values, x):
 def analyze_one(symbol, name, now, quotes, minute_cache, base_cache):
     """算一只 ETF 的量比。返回结果 dict。
 
-    quotes: fetch_quotes_batch() 的批量结果（主路径，缺这一项时才回落到单只分时）。
+    quotes: fetch_quotes() 的批量结果（主路径，缺这一项时才回落到单只分时）。
     """
     today = now.strftime('%Y-%m-%d')
 
@@ -584,13 +709,39 @@ def analyze_one(symbol, name, now, quotes, minute_cache, base_cache):
                     return {'symbol': symbol, 'name': name, 'state': '数据不足',
                             'error': f'行情获取失败: {type(e).__name__}'}
         points = mk.get('points') or []
-        date = mk.get('date') or today
         if points:
+            date = mk.get('date') or today
             price = points[-1][1]
             today_cum = points[-1][3]
             last_hhmm = points[-1][0]
+            # 分时只给 HHMM，拼上快照日期才能判断这份数据是哪天的
+            qt = f"{date.replace('-', '')}{last_hhmm}00" if last_hhmm else qt
         change_pct = mk.get('changePct')
         prev_close = mk.get('prevClose')
+
+    # ---- 新鲜度闸门：过期就把数字清空，绝不让 0 冒充"今天没成交" ----
+    stale = quote_stale_reason(now, qt)
+    if stale:
+        return {'symbol': symbol, 'name': name, 'date': date,
+                'price': None, 'prevClose': None, 'changePct': None,
+                'todayAmount': None, 'baseAmount': None, 'baseAmountSlow': None,
+                'ratio': None, 'ratioSlow': None, 'percentile': None,
+                'state': '数据不足', 'error': stale, 'quoteStale': True,
+                'basis': '', 'lastBar': last_hhmm,
+                'baseMode': None, 'baseNote': None,
+                'baseDays': None, 'baseDaysSlow': None}
+    if today_cum <= 0:
+        # 时间戳是新鲜的但成交额还是 0（刚开盘还没撮合完）：
+        # 这时候算出来必然是 0.00x，画在页面上会被读成"成交极度萎缩"。
+        return {'symbol': symbol, 'name': name, 'date': date,
+                'price': price, 'prevClose': prev_close,
+                'changePct': round(change_pct, 2) if change_pct is not None else None,
+                'todayAmount': None, 'baseAmount': None, 'baseAmountSlow': None,
+                'ratio': None, 'ratioSlow': None, 'percentile': None,
+                'state': '数据不足', 'error': '今日暂无成交额', 'quoteStale': False,
+                'basis': '', 'lastBar': last_hhmm,
+                'baseMode': None, 'baseNote': None,
+                'baseDays': None, 'baseDaysSlow': None}
 
     # ---- 基准（按日缓存）----
     bk = base_cache.get(symbol)
@@ -728,46 +879,9 @@ def main():
 
     symbols = [(s, n) for grp in WATCH_GROUPS for s, n in grp['etfs']]
 
-    # ---- 主路径：一次批量请求拿全部标的的现价/涨跌/成交额 ----
-    quotes = {}
-    try:
-        quotes = fetch_quotes_batch([s for s, _ in symbols])
-        _log(f'批量行情 {len(quotes)}/{len(symbols)} 只')
-    except Exception as e:
-        _log(f'批量行情失败，回落单只分时: {type(e).__name__}: {e}')
-
-    # ---- 一级市场净申赎（份额口径，T+1 披露）----
-    # 与量比完全独立的一条线：量比看二级市场成交，净申赎看一级市场真实申购赎回。
-    # 份额数据由 etf_share_flow 负责抓取/累积/回补，这里的失败一律降级为 None，
-    # 绝不影响量比主逻辑（份额源不可用是很常见的，深交所站点尤其不稳）。
-    share_map = {}
-    share_asof = None
-    share_asof_min = None
-    share_days = None
-    try:
-        import etf_share_flow as _sf
-        payload = _sf.ensure_history([s for s, _ in symbols], allow_backfill=False)
-        # 价格序列：用批量行情里的现价做最后一日，历史日从日线补（只对 sh 有全量历史）
-        warnings_off = True
-        for s, _ in symbols:
-            try:
-                pm = _day_close_map(s)
-                q = quotes.get(s) or {}
-                res = _sf.compute_one(payload, s, price_today=q.get('price'), price_map=pm)
-                share_map[s] = res
-            except Exception as e:
-                _log(f'{s} 净申赎计算失败: {type(e).__name__}: {e}')
-        if share_map:
-            asofs = [v.get('asOf') for v in share_map.values() if v.get('asOf')]
-            share_asof = max(asofs) if asofs else None
-            # 沪深披露时点不同：上交所 T 日盘后就有，深交所 T+1 傍晚才更新，
-            # 所以同一次监控里两端 asOf 会差一天，单独给出最早那天，前端显示成区间。
-            share_asof_min = min(asofs) if asofs else None
-            ds = [v.get('days') for v in share_map.values() if v.get('days')]
-            share_days = max(ds) if ds else None
-        _log(f'净申赎 {len(share_map)} 只，asOf={share_asof}')
-    except Exception as e:
-        _log(f'净申赎模块失败（降级为无数据）: {type(e).__name__}: {e}')
+    # ---- 主路径：一次批量请求拿全部标的的现价/涨跌/成交额（腾讯→新浪双源）----
+    quotes, quote_src, quote_err = fetch_quotes([s for s, _ in symbols])
+    _log(f'批量行情 {len(quotes)}/{len(symbols)} 只，源={quote_src or "无"}  {quote_err}')
 
     # ---- 并发计算：18 只标的互相独立，串行只是排队等网络 ----
     def _work(pair):
@@ -784,6 +898,43 @@ def main():
     with _fut.ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         for symbol, row in ex.map(_work, symbols):
             rows_by_symbol[symbol] = row
+
+    # ---- 一级市场净申赎（份额口径，T+1 披露）----
+    # 与量比完全独立的一条线：量比看二级市场成交，净申赎看一级市场真实申购赎回。
+    # 份额数据由 etf_share_flow 负责抓取/累积/回补，这里的失败一律降级为 None，
+    # 绝不影响量比主逻辑（份额源不可用是很常见的，深交所站点尤其不稳）。
+    #
+    # 放在行情算完之后：换算金额要用「变动日的收盘价」，而收盘价的最终来源是
+    # analyze_one（批量行情挂了还有分时兜底）。原来在行情之前算、只认批量行情，
+    # 结果行情源一断，份额明明算得出来，金额却整列变 None。
+    share_map = {}
+    share_asof = None
+    share_asof_min = None
+    share_days = None
+    try:
+        import etf_share_flow as _sf
+        payload = _sf.ensure_history([s for s, _ in symbols], allow_backfill=False)
+        # 价格序列：历史日从日线补（只对 sh 有全量历史），最后一日优先用现价
+        for s, _ in symbols:
+            try:
+                pm = _day_close_map(s)
+                row = rows_by_symbol.get(s) or {}
+                res = _sf.compute_one(payload, s, price_today=row.get('price'),
+                                      price_map=pm)
+                share_map[s] = res
+            except Exception as e:
+                _log(f'{s} 净申赎计算失败: {type(e).__name__}: {e}')
+        if share_map:
+            asofs = [v.get('asOf') for v in share_map.values() if v.get('asOf')]
+            share_asof = max(asofs) if asofs else None
+            # 沪深披露时点不同：上交所 T 日盘后就有，深交所 T+1 傍晚才更新，
+            # 所以同一次监控里两端 asOf 会差一天，单独给出最早那天，前端显示成区间。
+            share_asof_min = min(asofs) if asofs else None
+            ds = [v.get('days') for v in share_map.values() if v.get('days')]
+            share_days = max(ds) if ds else None
+        _log(f'净申赎 {len(share_map)} 只，asOf={share_asof}')
+    except Exception as e:
+        _log(f'净申赎模块失败（降级为无数据）: {type(e).__name__}: {e}')
 
     groups_out = []
     flat = []
@@ -836,7 +987,11 @@ def main():
                                    -(g['avgRatio'] or 0)))
 
     ok_rows = [x for x in flat if x.get('ratio') is not None]
-    net_rows = [x for x in flat if x.get('netAmount') is not None]
+    # 份额是官方口径、永远算得出来；金额要靠「变动日收盘价」折算，行情源一断就没有。
+    # 所以合计条以份额为准统计覆盖数与净申购/净赎回只数，金额缺了就留空，
+    # 不能让金额缺失把整条汇总一起拖没（那正是 11-05 页面上汇总区消失的原因）。
+    share_rows = [x for x in flat if x.get('netShares') is not None]
+    net_rows = [x for x in share_rows if x.get('netAmount') is not None]
     summary = {
         'strongCount': sum(1 for x in flat if x.get('state') == '显著放量'),
         'alertCount': sum(1 for x in flat if x.get('state') in ('显著放量', '放量')),
@@ -847,16 +1002,20 @@ def main():
         'netTotal': round(sum(x['netAmount'] for x in net_rows), 0) if net_rows else None,
         'netTotal5': round(sum(x['net5Amount'] for x in net_rows), 0) if net_rows else None,
         # 份额合计：与金额并列，用于对照「金额大到底是申赎多还是单价高」
-        'netSharesTotal': (round(sum(x['netShares'] for x in net_rows), 0)
-                           if net_rows else None),
-        'netSharesTotal5': (round(sum(x['net5Shares'] for x in net_rows), 0)
-                            if net_rows else None),
-        'netInflowCount': sum(1 for x in net_rows if x['netAmount'] > 0),
-        'netOutflowCount': sum(1 for x in net_rows if x['netAmount'] < 0),
-        'netCount': len(net_rows),
+        'netSharesTotal': (round(sum(x['netShares'] for x in share_rows), 0)
+                           if share_rows else None),
+        'netSharesTotal5': (round(sum(x['net5Shares'] for x in share_rows
+                                      if x.get('net5Shares') is not None), 0)
+                            if share_rows else None),
+        'netInflowCount': sum(1 for x in share_rows if x['netShares'] > 0),
+        'netOutflowCount': sum(1 for x in share_rows if x['netShares'] < 0),
+        'netCount': len(share_rows),
     }
 
     progress, used_min, in_session = trade_progress(now)
+    stale_rows = [x for x in flat if x.get('quoteStale')]
+    # 报价时间取全体最新的一条，作为"这批行情到底停在几点"的单一证据
+    quote_minutes = [x.get('lastBar') for x in flat if x.get('lastBar')]
     output = {
         'code': 200,
         'data': {
@@ -871,11 +1030,18 @@ def main():
             'inSession': in_session,
             'marketStatus': status,
             'quoteDate': flat[0].get('date') if flat else None,
+            # 行情链路自检：源是谁、失败原因、有多少只是因为过期被清空。
+            # 页面据此显示红色提示条——「数据没拿到」必须比「数据是 0」更显眼。
+            'quoteSource': quote_src or None,
+            'quoteError': quote_err or None,
+            'quoteStaleCount': len(stale_rows),
+            'quoteStaleNote': stale_rows[0].get('error') if stale_rows else None,
+            'quoteLastBar': max(quote_minutes) if quote_minutes else None,
             'shareAsOf': share_asof,
             'shareAsOfMin': share_asof_min,
             'shareDays': share_days,
             'timestamp': now.strftime('%Y-%m-%d %H:%M:%S'),
-            'dataSource': '腾讯分时累计成交额(minute/query) + 新浪30分钟额基准(sina kline)',
+            'dataSource': '腾讯/新浪批量行情(现价+成交额) + 新浪30分钟额基准',
             'costMs': int((time.time() - t0) * 1000),
         },
     }

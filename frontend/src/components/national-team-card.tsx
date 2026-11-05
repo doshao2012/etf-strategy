@@ -22,7 +22,7 @@ const GROUP_STATE_BADGE: Record<string, string> = {
 
 // 成交额：元 → 亿元
 function amtText(v: number | null | undefined) {
-  if (v === null || v === undefined) return '-';
+  if (v === null || v === undefined) return '—';
   const yi = v / 1e8;
   if (yi >= 100) return `${yi.toFixed(0)} 亿`;
   if (yi >= 10) return `${yi.toFixed(1)} 亿`;
@@ -31,7 +31,7 @@ function amtText(v: number | null | undefined) {
 
 // 净申赎金额：带符号，元 → 亿元
 function netText(v: number | null | undefined) {
-  if (v === null || v === undefined) return '-';
+  if (v === null || v === undefined) return '—';
   const yi = v / 1e8;
   const abs = Math.abs(yi);
   const body = abs >= 100 ? abs.toFixed(0) : abs >= 10 ? abs.toFixed(1) : abs.toFixed(2);
@@ -62,7 +62,7 @@ function netCellCls(v: number | null | undefined) {
 
 // 分位：申购强度越高越红；净赎回一侧走绿色
 function pctOfNetText(p: number | null | undefined) {
-  if (p === null || p === undefined) return '-';
+  if (p === null || p === undefined) return '—';
   return `${Math.round(p * 100)}%`;
 }
 
@@ -91,17 +91,17 @@ function asOfRange(min: string | null | undefined, max: string | null | undefine
 }
 
 function ratioText(r: number | null | undefined) {
-  if (r === null || r === undefined) return '-';
+  if (r === null || r === undefined) return '—';
   return `${r.toFixed(2)}x`;
 }
 
 function pctText(p: number | null | undefined) {
-  if (p === null || p === undefined) return '-';
+  if (p === null || p === undefined) return '—';
   return `${Math.round(p * 100)}%`;
 }
 
 function changeText(p: number | null | undefined) {
-  if (p === null || p === undefined) return '-';
+  if (p === null || p === undefined) return '—';
   return `${p >= 0 ? '+' : ''}${p.toFixed(2)}%`;
 }
 
@@ -123,7 +123,8 @@ function ratioCellBg(r: number | null | undefined) {
 
 function EtfCard({ etf, rank }: { etf: NationalTeamEtf; rank: number }) {
   const isAlert = etf.state === '放量' || etf.state === '显著放量';
-  const badge = STATE_BADGE[etf.error ? '数据不足' : etf.state] || STATE_BADGE['数据不足'];
+  const badge = STATE_BADGE[etf.state] || STATE_BADGE['数据不足'];
+  const noQuote = etf.price == null && etf.todayAmount == null;
 
   return (
     <Card className={`mb-3 bg-white border ${isAlert ? 'border-orange-300 shadow-md' : 'border-slate-200 shadow-sm'} hover:shadow-md transition-shadow`}>
@@ -140,8 +141,8 @@ function EtfCard({ etf, rank }: { etf: NationalTeamEtf; rank: number }) {
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            <span className={`px-2 py-0.5 text-xs font-medium rounded ${badge}`}>
-              {etf.error ? '异常' : etf.state}
+            <span className={`px-2 py-0.5 text-xs font-medium rounded ${badge}`} title={etf.error || ''}>
+              {etf.state}
             </span>
           </div>
         </div>
@@ -150,8 +151,8 @@ function EtfCard({ etf, rank }: { etf: NationalTeamEtf; rank: number }) {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
           <div className="bg-slate-50 rounded-lg p-3 text-center">
             <p className="text-xs text-slate-500 mb-1">现价</p>
-            <p className="text-xl font-bold text-slate-700 tabular-nums">
-              {etf.price != null ? etf.price.toFixed(3) : '-'}
+            <p className={`text-xl font-bold tabular-nums ${etf.price != null ? 'text-slate-700' : 'text-slate-300'}`}>
+              {etf.price != null ? etf.price.toFixed(3) : '—'}
             </p>
           </div>
           <div className={`rounded-lg p-3 text-center tabular-nums ${changeCls(etf.changePct).includes('red') ? 'bg-red-50' : changeCls(etf.changePct).includes('emerald') ? 'bg-emerald-50' : 'bg-slate-50'}`}>
@@ -162,7 +163,9 @@ function EtfCard({ etf, rank }: { etf: NationalTeamEtf; rank: number }) {
           </div>
           <div className="bg-blue-50 rounded-lg p-3 text-center">
             <p className="text-xs text-slate-500 mb-1">今日成交额</p>
-            <p className="text-xl font-bold text-blue-600 tabular-nums">{amtText(etf.todayAmount)}</p>
+            <p className={`text-xl font-bold tabular-nums ${etf.todayAmount != null ? 'text-blue-600' : 'text-slate-300'}`}>
+              {amtText(etf.todayAmount)}
+            </p>
           </div>
           <div className={`rounded-lg p-3 text-center ${ratioCellBg(etf.ratio)}`}>
             <p className="text-xs text-slate-500 mb-1">量比</p>
@@ -171,6 +174,9 @@ function EtfCard({ etf, rank }: { etf: NationalTeamEtf; rank: number }) {
             </p>
           </div>
         </div>
+        {noQuote && etf.error && (
+          <p className="mb-2 px-1 text-[10px] text-red-500">{etf.error}</p>
+        )}
 
         {/* 一级市场：净申赎（份额口径，T+1 披露）。与上方量比是两条独立证据线 */}
         <div className="rounded-lg ring-1 ring-slate-200 bg-white overflow-hidden mb-2">
@@ -183,44 +189,53 @@ function EtfCard({ etf, rank }: { etf: NationalTeamEtf; rank: number }) {
             )}
             <span className="ml-auto text-[9px] text-slate-300">T+1 披露 · 非实时</span>
           </div>
-          {etf.netAmount === null || etf.netAmount === undefined ? (
+          {etf.netAmount == null && etf.netShares == null ? (
             <div className="px-2.5 py-2 text-[10px] text-slate-400">
               {etf.netNote || '暂无份额数据'}
             </div>
           ) : (
-            <div className="grid grid-cols-3 divide-x divide-slate-100">
-              <div className="px-2 py-1.5 text-center">
-                <p className="text-[9px] text-slate-400 mb-0.5">当日</p>
-                <p className={`text-sm font-bold tabular-nums ${netCls(etf.netAmount)}`}>
-                  {netText(etf.netAmount)}
-                </p>
-                {etf.netShares !== null && etf.netShares !== undefined && (
-                  <p className="text-[9px] text-slate-400 tabular-nums mt-0.5">
-                    {netSharesText(etf.netShares)}
+            <>
+              <div className="grid grid-cols-3 divide-x divide-slate-100">
+                <div className="px-2 py-1.5 text-center">
+                  <p className="text-[9px] text-slate-400 mb-0.5">当日</p>
+                  {/* 金额要靠「变动日收盘价」折算，收盘价缺失时退化成只显示份额，
+                      不能因为金额算不出来就把份额一起藏掉 */}
+                  <p className={`text-sm font-bold tabular-nums ${netCls(etf.netAmount ?? etf.netShares)}`}>
+                    {etf.netAmount != null ? netText(etf.netAmount) : netSharesText(etf.netShares)}
                   </p>
-                )}
-              </div>
-              <div className="px-2 py-1.5 text-center">
-                <p className="text-[9px] text-slate-400 mb-0.5">近5日累计</p>
-                <p className={`text-sm font-bold tabular-nums ${netCls(etf.net5Amount)}`}>
-                  {netText(etf.net5Amount)}
-                </p>
-                {etf.net5Shares !== null && etf.net5Shares !== undefined && (
                   <p className="text-[9px] text-slate-400 tabular-nums mt-0.5">
-                    {netSharesText(etf.net5Shares)}
+                    {etf.netAmount != null ? netSharesText(etf.netShares) : '金额待补'}
                   </p>
-                )}
+                </div>
+                <div className="px-2 py-1.5 text-center">
+                  <p className="text-[9px] text-slate-400 mb-0.5">近5日累计</p>
+                  <p className={`text-sm font-bold tabular-nums ${netCls(etf.net5Amount ?? etf.net5Shares)}`}>
+                    {etf.net5Amount != null ? netText(etf.net5Amount) : netSharesText(etf.net5Shares)}
+                  </p>
+                  <p className="text-[9px] text-slate-400 tabular-nums mt-0.5">
+                    {etf.net5Amount != null
+                      ? netSharesText(etf.net5Shares)
+                      : etf.net5Shares != null ? '金额待补' : ''}
+                  </p>
+                </div>
+                <div className="px-2 py-1.5 text-center">
+                  <p className="text-[9px] text-slate-400 mb-0.5">
+                    份额分位{etf.netPercentile != null && etf.netDays ? `(${etf.netDays}日)` : ''}
+                  </p>
+                  <p className={`text-sm font-bold tabular-nums ${pctOfNetCls(etf.netPercentile, etf.netAmount)}`}>
+                    {pctOfNetText(etf.netPercentile)}
+                  </p>
+                  <p className="text-[9px] text-slate-400 mt-0.5">
+                    {etf.netPercentile != null ? '越高越异常' : '历史不足 20 日'}
+                  </p>
+                </div>
               </div>
-              <div className="px-2 py-1.5 text-center">
-                <p className="text-[9px] text-slate-400 mb-0.5">
-                  份额分位{etf.netDays ? `(${etf.netDays}日)` : ''}
-                </p>
-                <p className={`text-sm font-bold tabular-nums ${pctOfNetCls(etf.netPercentile, etf.netAmount)}`}>
-                  {pctOfNetText(etf.netPercentile)}
-                </p>
-                <p className="text-[9px] text-slate-400 mt-0.5">越高越异常</p>
-              </div>
-            </div>
+              {etf.netNote && (
+                <div className="px-2.5 py-1 text-[9px] text-slate-400 border-t border-slate-100 bg-slate-50/60">
+                  {etf.netNote}
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -273,36 +288,71 @@ function GroupBlock({ group, rankOffset }: { group: NationalTeamGroup; rankOffse
 
 export default function NationalTeamCard({ data }: { data: Data }) {
   const { summary, groups, marketStatus, timestamp, shareAsOf, shareAsOfMin, shareDays } = data;
+  const staleCount = data.quoteStaleCount ?? 0;
+  const amountKnown = summary.netTotal != null;
+  const sharesKnown = summary.netSharesTotal != null;
 
   return (
     <div>
+      {/* 行情链路异常：必须比任何数字都显眼。
+          数据源断了的时候，把 0 画出来会被读成「今天极度缩量、没有任何异动」，
+          这是比不显示更糟的误导——11-05 线上就出现过页面全 0 但仍标「正常」。 */}
+      {(data.quoteError || staleCount > 0) && (
+        <div className="mb-2 mx-1 rounded-lg bg-red-50 ring-1 ring-red-200 px-3 py-2">
+          <p className="text-xs font-semibold text-red-700">
+            行情数据未更新{staleCount > 0 ? ` · ${staleCount}/${summary.totalCount} 只` : ''}
+          </p>
+          <p className="text-[10px] text-red-600 mt-0.5 leading-relaxed">
+            {data.quoteError
+              ? `腾讯 / 新浪行情接口都请求失败（${data.quoteError}）。`
+              : `${data.quoteStaleNote || '报价时间已过期'}。`}
+            现价、涨跌幅、成交额、量比已置空，不再拿 0 冒充收盘数据。
+          </p>
+        </div>
+      )}
+
       {/* 更新时间（放量状态与规则说明已在页面顶部汇总卡里，这里不重复） */}
       <div className="flex items-center justify-between mb-2 px-1">
         <span className="text-sm font-medium text-slate-500">
-          放量 {summary.alertCount + summary.strongCount} / {summary.totalCount} · {marketStatus}
+          {staleCount >= summary.totalCount && summary.totalCount > 0
+            ? `行情未更新 · ${marketStatus}`
+            : `放量 ${summary.alertCount + summary.strongCount} / ${summary.totalCount} · ${marketStatus}`}
         </span>
         <span className="text-xs text-slate-400 tabular-nums" title={timestamp}>
           {timestamp.slice(5, 16)} 更新
         </span>
       </div>
 
-      {/* 一级市场合计：全样本当日与近 5 日净申赎 */}
-      {summary.netTotal !== null && summary.netTotal !== undefined && (
+      {/* 一级市场合计：全样本当日与近 5 日净申赎。
+          份额是官方口径、始终算得出；金额依赖收盘价，行情断供时留空——只要还有份额，
+          这条汇总就不该整块消失（那样看起来像"份额模块也坏了"）。 */}
+      {(amountKnown || sharesKnown) && (
         <div className="mb-3 mx-1 rounded-lg bg-gradient-to-r from-slate-50 to-white ring-1 ring-slate-200 px-3 py-2">
           <div className="flex items-center flex-wrap gap-x-3 gap-y-1">
             <span className="text-[10px] font-medium text-slate-500">一级市场合计净申购</span>
-            <span className={`text-sm font-bold tabular-nums ${netCls(summary.netTotal)}`}>
-              {netText(summary.netTotal)}
-            </span>
-            {summary.netSharesTotal !== null && summary.netSharesTotal !== undefined && (
-              <span className="text-[10px] text-slate-400 tabular-nums">
-                {netSharesText(summary.netSharesTotal)}
-              </span>
+            {amountKnown ? (
+              <>
+                <span className={`text-sm font-bold tabular-nums ${netCls(summary.netTotal)}`}>
+                  {netText(summary.netTotal)}
+                </span>
+                {sharesKnown && (
+                  <span className="text-[10px] text-slate-400 tabular-nums">
+                    {netSharesText(summary.netSharesTotal)}
+                  </span>
+                )}
+              </>
+            ) : (
+              <>
+                <span className={`text-sm font-bold tabular-nums ${netCls(summary.netSharesTotal)}`}>
+                  {netSharesText(summary.netSharesTotal)}
+                </span>
+                <span className="text-[9px] text-slate-400">金额待补收盘价</span>
+              </>
             )}
-            {summary.netTotal5 !== null && (
+            {summary.netTotal5 != null && (
               <span className="text-[10px] text-slate-400">
                 近5日 <span className={`font-semibold tabular-nums ${netCls(summary.netTotal5)}`}>{netText(summary.netTotal5)}</span>
-                {summary.netSharesTotal5 !== null && summary.netSharesTotal5 !== undefined && (
+                {summary.netSharesTotal5 != null && (
                   <span className="tabular-nums"> / {netSharesText(summary.netSharesTotal5)}</span>
                 )}
               </span>

@@ -452,6 +452,16 @@ export interface NationalTeamResponse {
     inSession: boolean;
     marketStatus: string;
     quoteDate: string | null;
+    /** 行情源：'腾讯' / '新浪'；null 表示两源都失败 */
+    quoteSource?: string | null;
+    /** 两源都失败时的原因（页面据此显示红色提示条） */
+    quoteError?: string | null;
+    /** 有多少只因为报价过期被清空成「无数据」 */
+    quoteStaleCount?: number;
+    /** 过期原因的一句话说明（如「行情停在 09:30，今日收盘数据未到」） */
+    quoteStaleNote?: string | null;
+    /** 最新一根报价的时间点 HHMM */
+    quoteLastBar?: string | null;
     /** 份额数据最新日期 YYYYMMDD */
     shareAsOf: string | null;
     /** 份额数据最早日期 YYYYMMDD（沪深披露时点不同，两端会差一天） */

@@ -942,28 +942,39 @@ export default function ETFRotationPage() {
                         );
                       })()}
                     </div>
-                  ) : isNationalTeamMode ? (
-                    <div className="flex items-center gap-2">
-                      <Shield className="w-5 h-5 text-emerald-500" />
-                      <span className="text-sm font-medium text-slate-700">
-                        放量异动
-                      </span>
-                      <span className={`text-sm font-bold ${
-                        (nationalTeamView?.data.summary.strongCount ?? 0) > 0
-                          ? 'text-red-600'
-                          : (nationalTeamView?.data.summary.alertCount ?? 0) > 0
-                          ? 'text-orange-600'
-                          : 'text-slate-600'
-                      }`}>
-                        {nationalTeamView
-                          ? `${nationalTeamView.data.summary.strongCount} 显著 / ${nationalTeamView.data.summary.alertCount} 放量`
-                          : '-'}
-                      </span>
-                      <span className="text-xs text-slate-500">
-                        {nationalTeamView?.data.marketStatus || ''}
-                      </span>
-                    </div>
-                  ) : isCybDividendMode ? (
+                  ) : isNationalTeamMode ? (() => {
+                    const nt = nationalTeamView?.data;
+                    // 全部标的的报价都过期时，「0 显著 / 0 放量」是假象——那是没数据，
+                    // 不是没放量。这里必须换成明确的数据源告警。
+                    const staleAll = !!nt && nt.summary.totalCount > 0
+                      && (nt.quoteStaleCount ?? 0) >= nt.summary.totalCount;
+                    return (
+                      <div className="flex items-center gap-2">
+                        <Shield className={`w-5 h-5 ${staleAll ? 'text-red-500' : 'text-emerald-500'}`} />
+                        <span className="text-sm font-medium text-slate-700">
+                          {staleAll ? '行情未更新' : '放量异动'}
+                        </span>
+                        <span className={`text-sm font-bold ${
+                          staleAll
+                            ? 'text-red-600'
+                            : (nt?.summary.strongCount ?? 0) > 0
+                            ? 'text-red-600'
+                            : (nt?.summary.alertCount ?? 0) > 0
+                            ? 'text-orange-600'
+                            : 'text-slate-600'
+                        }`}>
+                          {!nt
+                            ? '-'
+                            : staleAll
+                            ? `${nt.quoteStaleCount}/${nt.summary.totalCount} 只无有效报价`
+                            : `${nt.summary.strongCount} 显著 / ${nt.summary.alertCount} 放量`}
+                        </span>
+                        <span className="text-xs text-slate-500">
+                          {nt?.marketStatus || ''}
+                        </span>
+                      </div>
+                    );
+                  })() : isCybDividendMode ? (
                     <div className="flex items-center gap-2">
                       <Shield className="w-5 h-5 text-emerald-500" />
                       <span className="text-sm font-medium text-slate-700">
