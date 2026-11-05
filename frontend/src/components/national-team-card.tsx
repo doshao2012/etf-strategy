@@ -121,7 +121,9 @@ function ratioCellBg(r: number | null | undefined) {
 
 /* ---------------- 单只 ETF 卡片（对齐趋势轮动设计语言） ---------------- */
 
-function EtfCard({ etf, rank }: { etf: NationalTeamEtf; rank: number }) {
+function EtfCard({ etf, rank, prevDay, qDay }: {
+  etf: NationalTeamEtf; rank: number; prevDay?: boolean; qDay?: string | null;
+}) {
   const isAlert = etf.state === '放量' || etf.state === '显著放量';
   const badge = STATE_BADGE[etf.state] || STATE_BADGE['数据不足'];
   const noQuote = etf.price == null && etf.todayAmount == null;
@@ -150,25 +152,25 @@ function EtfCard({ etf, rank }: { etf: NationalTeamEtf; rank: number }) {
         {/* 二级市场指标：四宫格（现价 / 涨跌幅 / 成交额 / 量比） */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
           <div className="bg-slate-50 rounded-lg p-3 text-center">
-            <p className="text-xs text-slate-500 mb-1">现价</p>
+            <p className="text-xs text-slate-500 mb-1">{prevDay ? '收盘价' : '现价'}</p>
             <p className={`text-xl font-bold tabular-nums ${etf.price != null ? 'text-slate-700' : 'text-slate-300'}`}>
               {etf.price != null ? etf.price.toFixed(3) : '—'}
             </p>
           </div>
           <div className={`rounded-lg p-3 text-center tabular-nums ${changeCls(etf.changePct).includes('red') ? 'bg-red-50' : changeCls(etf.changePct).includes('emerald') ? 'bg-emerald-50' : 'bg-slate-50'}`}>
-            <p className="text-xs text-slate-500 mb-1">今日涨跌幅</p>
+            <p className="text-xs text-slate-500 mb-1">{prevDay ? '当日涨跌幅' : '今日涨跌幅'}</p>
             <p className={`text-xl font-bold tabular-nums ${changeCls(etf.changePct)}`}>
               {changeText(etf.changePct)}
             </p>
           </div>
           <div className="bg-blue-50 rounded-lg p-3 text-center">
-            <p className="text-xs text-slate-500 mb-1">今日成交额</p>
+            <p className="text-xs text-slate-500 mb-1">{prevDay ? '当日成交额' : '今日成交额'}</p>
             <p className={`text-xl font-bold tabular-nums ${etf.todayAmount != null ? 'text-blue-600' : 'text-slate-300'}`}>
               {amtText(etf.todayAmount)}
             </p>
           </div>
           <div className={`rounded-lg p-3 text-center ${ratioCellBg(etf.ratio)}`}>
-            <p className="text-xs text-slate-500 mb-1">量比</p>
+            <p className="text-xs text-slate-500 mb-1">{prevDay ? '全天量比' : '量比'}</p>
             <p className={`text-xl font-bold tabular-nums ${ratioCellBg(etf.ratio).split(' ')[1]}`}>
               {ratioText(etf.ratio)}
             </p>
@@ -260,7 +262,9 @@ function EtfCard({ etf, rank }: { etf: NationalTeamEtf; rank: number }) {
 
 /* ---------------- 分组 ---------------- */
 
-function GroupBlock({ group, rankOffset }: { group: NationalTeamGroup; rankOffset: number }) {
+function GroupBlock({ group, rankOffset, prevDay, qDay }: {
+  group: NationalTeamGroup; rankOffset: number; prevDay?: boolean; qDay?: string | null;
+}) {
   const badge = GROUP_STATE_BADGE[group.state] || GROUP_STATE_BADGE['数据不足'];
   return (
     <div className="mb-1">
@@ -278,7 +282,7 @@ function GroupBlock({ group, rankOffset }: { group: NationalTeamGroup; rankOffse
         </span>
       </div>
       {group.etfs.map((e, i) => (
-        <EtfCard key={e.symbol} etf={e} rank={rankOffset + i + 1} />
+        <EtfCard key={e.symbol} etf={e} rank={rankOffset + i + 1} prevDay={prevDay} qDay={qDay} />
       ))}
     </div>
   );
@@ -291,6 +295,10 @@ export default function NationalTeamCard({ data }: { data: Data }) {
   const staleCount = data.quoteStaleCount ?? 0;
   const amountKnown = summary.netTotal != null;
   const sharesKnown = summary.netSharesTotal != null;
+  // 行情所属日期 vs 本次生成日期：不同则说明看到的是上一交易日的收盘快照
+  const qDay = data.quoteDate ? data.quoteDate.slice(5) : null;
+  const genDay = timestamp.slice(5, 10);
+  const prevDay = !!qDay && qDay !== genDay;
 
   return (
     <div>
@@ -318,8 +326,10 @@ export default function NationalTeamCard({ data }: { data: Data }) {
             ? `行情未更新 · ${marketStatus}`
             : `放量 ${summary.alertCount + summary.strongCount} / ${summary.totalCount} · ${marketStatus}`}
         </span>
-        <span className="text-xs text-slate-400 tabular-nums" title={timestamp}>
-          {timestamp.slice(5, 16)} 更新
+        {/* 收盘后（尤其凌晨/盘前）"X 分钟前更新"会被读成数据过期，
+            实际上它就是上一交易日的完整收盘。这里直接标明行情属于哪一天。 */}
+        <span className="text-xs text-slate-400 tabular-nums" title={`数据生成 ${timestamp}`}>
+          {qDay && qDay !== genDay ? `行情 ${qDay} 收盘` : `${timestamp.slice(5, 16)} 更新`}
         </span>
       </div>
 
@@ -378,7 +388,8 @@ export default function NationalTeamCard({ data }: { data: Data }) {
 
       {groups.map((g, gi) => {
         const rankOffset = groups.slice(0, gi).reduce((n, x) => n + x.etfs.length, 0);
-        return <GroupBlock key={g.index} group={g} rankOffset={rankOffset} />;
+        return <GroupBlock key={g.index} group={g} rankOffset={rankOffset}
+                           prevDay={prevDay} qDay={qDay} />;
       })}
     </div>
   );

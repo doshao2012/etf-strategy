@@ -344,9 +344,11 @@ def quote_stale_reason(now, quote_time):
     if dt is None:
         return '行情快照缺少时间戳'
     status = market_status(now)
-    # 周末/盘前没有"今天的行情"这回事，最后交易日的数据就是最新数据
+    # 周末/盘前没有"今天的行情"这回事，最后交易日的数据就是最新数据。
+    # 阈值放到 10 天是为了放过春节/国庆这种长假——长假里数据停在节前最后一天
+    # 完全正常，弹「行情未更新」纯属噪音（页面上本来就标着行情属于哪一天）。
     if status in ('休市', '未开盘'):
-        return '' if (now.date() - dt.date()).days <= 5 else f'行情停留在 {dt.strftime("%m-%d %H:%M")}'
+        return '' if (now.date() - dt.date()).days <= 10 else f'行情停留在 {dt.strftime("%m-%d %H:%M")}'
     if dt.date() < now.date():
         return f'行情停留在 {dt.strftime("%m-%d %H:%M")}'
     if dt > now + timedelta(minutes=3):
@@ -743,9 +745,19 @@ def analyze_one(symbol, name, now, quotes, minute_cache, base_cache):
                 'baseMode': None, 'baseNote': None,
                 'baseDays': None, 'baseDaysSlow': None}
 
+    # ---- 参照时点：一律用「行情自己的时间」，不用 now ----
+    # 收盘后（尤其凌晨、盘前）now 和数据的时点根本不是一回事：
+    # 数据是 11-05 15:00 的全天值，now 却是 11-06 00:45。
+    # 拿 now 去取「同进度基准」，会落到 09:30 之前，基准近乎 0，
+    # 量比算不出来、状态还被强制改成「数据不足」——这就是"收盘后一片横线"的根因。
+    qdt = _parse_quote_time(qt)
+    ref_dt = qdt or now
+    ref_min = ref_dt.hour * 60 + ref_dt.minute
+    ref_status = market_status(ref_dt)
+
     # ---- 基准（按日缓存）----
     bk = base_cache.get(symbol)
-    if not bk or bk.get('date') != today or time.time() - bk.get('ts', 0) > BASE_TTL:
+    if not bk or bk.get('date') != date or time.time() - bk.get('ts', 0) > BASE_TTL:
         try:
             bars = fetch_m30_amount(symbol)
             base = build_base(bars)
@@ -755,7 +767,10 @@ def analyze_one(symbol, name, now, quotes, minute_cache, base_cache):
             else:
                 # 兜底：日线均额 × 日内累计占比（分钟线缺失时）
                 days = fetch_day_amount(symbol, 25)
-                amts = [v for d, v in days if d != today][-BASE_DAYS_FAST:]
+                # 剔除的必须是「数据所属那天」，不是 now 那天：
+                # 凌晨时 now 是 11-06，而当天数据是 11-05，用 now 剔不掉，
+                # 会把当日成交额混进自己的基准里，量比被稀释成 ≈1。
+                amts = [v for d, v in days if d != date][-BASE_DAYS_FAST:]
                 if len(amts) >= MIN_BASE_DAYS:
                     avg = sum(amts) / len(amts)
                     # 无分钟线时只能用经验曲线（全市场通用形状）
@@ -773,12 +788,12 @@ def analyze_one(symbol, name, now, quotes, minute_cache, base_cache):
                     }
                 else:
                     base = None
-            bk = {'ts': time.time(), 'date': today, 'base': base}
+            bk = {'ts': time.time(), 'date': date, 'base': base}
             base_cache[symbol] = bk
         except Exception as e:
             _log(f'{symbol} 基准失败: {type(e).__name__}: {e}')
             if not bk:
-                bk = {'ts': time.time(), 'date': today, 'base': None}
+                bk = {'ts': time.time(), 'date': date, 'base': None}
 
     base = bk.get('base')
     if not base:
@@ -787,8 +802,7 @@ def analyze_one(symbol, name, now, quotes, minute_cache, base_cache):
                 'error': '历史基准不足'}
 
     # ---- 计算量比（近5日同进度基准为主，近20日为参考）----
-    now_min = now.hour * 60 + now.minute
-    tail_mode = now_min >= _minutes(TAIL_SWITCH) and now_min <= PM_CLOSE
+    tail_mode = ref_min >= _minutes(TAIL_SWITCH) and ref_min <= PM_CLOSE
 
     if tail_mode:
         # 尾盘：基准曲线尾部太陡，改用全天量比（今日累计 ÷ 全天均量）
@@ -796,10 +810,11 @@ def analyze_one(symbol, name, now, quotes, minute_cache, base_cache):
         base_vol_slow = base.get('totalSlow') or base['total']
         basis = '全天量比'
     else:
-        base_vol = base_curve_at(base, now_min)
+        # 收盘后 ref_min 已过 15:00，base_curve_at 自动取全天锚点
+        base_vol = base_curve_at(base, ref_min)
         base_vol_slow = base_curve_at(
-            {'cumMedian': base.get('cumSlow') or base['cumMedian']}, now_min)
-        basis = '同进度量比'
+            {'cumMedian': base.get('cumSlow') or base['cumMedian']}, ref_min)
+        basis = '全天量比' if ref_min > PM_CLOSE else '同进度量比'
 
     r = today_cum / base_vol if base_vol > 0 else None
     r_slow = today_cum / base_vol_slow if base_vol_slow > 0 else None
@@ -813,7 +828,7 @@ def analyze_one(symbol, name, now, quotes, minute_cache, base_cache):
         for day_acc in base.get('dayCum') or []:
             acc = 0.0
             for i, s in enumerate(SLOTS):
-                if _minutes(f'{s[:2]}:{s[2:]}') <= now_min:
+                if _minutes(f'{s[:2]}:{s[2:]}') <= ref_min:
                     acc = day_acc[i]
             b = base_vol_slow if base_vol_slow > 0 else base_vol
             if b > 0:
@@ -821,8 +836,11 @@ def analyze_one(symbol, name, now, quotes, minute_cache, base_cache):
         pct = _percentile(hist_ratios, r_slow if r_slow is not None else r) \
             if r is not None else None
 
-    state = classify(r) if (now_min - AM_OPEN) >= OPEN_QUIET_MIN or market_status(now) in ('午休', '已收盘', '尾盘') else '数据不足'
-    if now_min < AM_OPEN + OPEN_QUIET_MIN and now.weekday() < 5:
+    # 状态判定同样用行情的时点：收盘后 ref_min 已过 15:00，天然不触发「开盘观察」
+    state = classify(r) if (ref_min - AM_OPEN) >= OPEN_QUIET_MIN or ref_status in ('午休', '已收盘', '尾盘') else '数据不足'
+    today_q = ref_dt.strftime('%Y-%m-%d')
+    if (ref_min < AM_OPEN + OPEN_QUIET_MIN and ref_dt.weekday() < 5
+            and today_q == now.strftime('%Y-%m-%d')):
         state = '数据不足'
 
     return {
@@ -1014,7 +1032,19 @@ def main():
         'netCount': len(share_rows),
     }
 
-    progress, used_min, in_session = trade_progress(now)
+    # 进度条同样按「行情时点」算：凌晨打开页面时数据其实是上一交易日的完整收盘，
+    # 用 now 算会得到 0%（看起来像"今天一笔都没成交"），用行情时点则得到 100%。
+    _qdate = flat[0].get('date') if flat else None
+    _bar = max((x.get('lastBar') for x in flat if x.get('lastBar')), default='')
+    ref_now = now
+    if _qdate and len(_bar) == 4:
+        try:
+            ref_now = datetime.strptime(
+                _qdate.replace('-', '') + _bar, '%Y%m%d%H%M').replace(
+                tzinfo=timezone(timedelta(hours=8)))
+        except Exception:
+            ref_now = now
+    progress, used_min, in_session = trade_progress(ref_now)
     stale_rows = [x for x in flat if x.get('quoteStale')]
     # 报价时间取全体最新的一条，作为"这批行情到底停在几点"的单一证据
     quote_minutes = [x.get('lastBar') for x in flat if x.get('lastBar')]

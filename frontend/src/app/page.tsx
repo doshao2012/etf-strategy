@@ -971,6 +971,9 @@ export default function ETFRotationPage() {
                         </span>
                         <span className="text-xs text-slate-500">
                           {nt?.marketStatus || ''}
+                          {nt?.quoteDate && nt.quoteDate !== nt.timestamp.slice(0, 10)
+                            ? ` · 行情 ${nt.quoteDate.slice(5)} 收盘`
+                            : ''}
                         </span>
                       </div>
                     );
@@ -1024,7 +1027,7 @@ export default function ETFRotationPage() {
                     </div>
                   )}
                   <span className="text-xs text-slate-400">
-                    更新时间: {lastUpdate}
+                    {isNationalTeamMode ? '生成于' : '更新时间:'} {lastUpdate}
                   </span>
                 </div>
                 {/* 规则说明 */}
