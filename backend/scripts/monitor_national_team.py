@@ -911,9 +911,11 @@ def main():
     share_asof = None
     share_asof_min = None
     share_days = None
+    share_backfill = None
     try:
         import etf_share_flow as _sf
         payload = _sf.ensure_history([s for s, _ in symbols], allow_backfill=False)
+        share_backfill = _sf.backfill_state()
         # 价格序列：历史日从日线补（只对 sh 有全量历史），最后一日优先用现价
         for s, _ in symbols:
             try:
@@ -1040,6 +1042,8 @@ def main():
             'shareAsOf': share_asof,
             'shareAsOfMin': share_asof_min,
             'shareDays': share_days,
+            # 后台自动回补的进度：历史不足时脚本会自己补，前端据此提示「回补中」
+            'shareBackfill': share_backfill,
             'timestamp': now.strftime('%Y-%m-%d %H:%M:%S'),
             'dataSource': '腾讯/新浪批量行情(现价+成交额) + 新浪30分钟额基准',
             'costMs': int((time.time() - t0) * 1000),

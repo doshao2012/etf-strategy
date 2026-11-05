@@ -25,10 +25,12 @@ ETF 一级市场净申赎监控（份额口径）
       所以写入时一律用**接口返回的日期字段**做键，绝不能用「今天」，否则会造出
       连续两天份额相同、净申赎恒为 0 的伪数据（见 _prune_fake_szse 兜底）。
 
-    因此本模块的策略是「当日快照 + 按需回补」：
+    因此本模块的策略是「当日快照 + 自动回补」：
       1. 每次调用先把最近 7~10 天的沪深份额补齐（带限流，正常只一两个请求）
-      2. --backfill 独立进程负责把历史补到 60 天以上
-      3. 盘中监控（monitor_national_team）传 allow_backfill=False，只读不算，绝不阻塞量比
+      2. 发现历史不足 PERCENTILE_DAYS 时，起一个后台线程静默补到 60 天以上，
+         本次调用立即返回——盘中监控既不被阻塞，也不需要人记得跑 --backfill
+      3. 盘中监控（monitor_national_team）传 allow_backfill=False，只读不算，
+         绝不阻塞量比；回补在后台跑，下一轮刷新就有分位了
 
     实测总耗时（18 只标的、从零补满 60 天）：
         最初串行逐日 + 深市分 3 段  →  约 50 秒
@@ -56,6 +58,7 @@ ETF 一级市场净申赎监控（份额口径）
 import json
 import os
 import sys
+import threading
 import time
 from datetime import datetime, timedelta
 
@@ -70,6 +73,8 @@ MIN_DAYS_FOR_PCT = 20
 BACKFILL_CALENDAR_DAYS = 95
 # 当日快照落盘的最小间隔（秒）。同一天内反复请求时不必重复抓。
 SNAPSHOT_MIN_INTERVAL = 1800
+# 后台自动回补：历史不足时异步补一次，失败后至少隔这么久再试（防失败风暴）
+BACKFILL_RETRY_SEC = 1800
 # 单个交易所网络超时
 SSE_TIMEOUT = 40
 SZSE_TIMEOUT = 60
@@ -107,11 +112,18 @@ def _load():
         return {'days': {}, 'meta': {}}
 
 
+_SAVE_LOCK = threading.Lock()
+
+
 def _save(payload):
-    tmp = SHARE_FILE + '.tmp'
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(payload, f, ensure_ascii=False, separators=(',', ':'))
-    os.replace(tmp, SHARE_FILE)
+    # 后台回补线程和请求线程都会落盘，加锁只为保证「不会写出半个 JSON」。
+    # 逻辑层面的互相覆盖（各自 load 后 save）不做强一致：份额是按日期累加的，
+    # 丢了下次自己会补回来，代价远小于在这里加一把长锁把监控堵住。
+    with _SAVE_LOCK:
+        tmp = SHARE_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, separators=(',', ':'))
+        os.replace(tmp, SHARE_FILE)
 
 
 def _clean_num(v):
@@ -519,13 +531,86 @@ def _prune_fake_szse(days):
     return 0
 
 
+# ---------------------------------------------------------------- 后台自动回补
+# 为什么需要它：allow_backfill=False 的调用方（盘中监控）只会吃到「最近 7~10 天
+# 快照」这一个窗口，历史天数永远长不到 PERCENTILE_DAYS，分位就永远算不出来。
+# 早期版本让监控自己同步回补，慢；后来改成只读，于是**必须靠人记得跑 --backfill**，
+# 一忘就永远只有八九天（服务器上实际就停在这个状态）。
+# 折中方案：检测到历史不足就起一个 daemon 线程去补，本次请求立即返回。
+# 既不阻塞监控，也不需要人记得。
+_BF_LOCK = threading.Lock()
+_BF_STATE = {'running': False, 'lastTs': 0.0, 'lastMsg': '', 'lastCost': None}
+
+
+def backfill_state():
+    """给接口/调试用：后台回补的当前状态"""
+    with _BF_LOCK:
+        return dict(_BF_STATE)
+
+
+def _needs_backfill(days, symbols):
+    """本地历史是否还不够算分位。
+
+    只看**天数**，不看新鲜度——新鲜度由 ensure_history 开头的当日快照负责
+    （那一步在 allow_backfill=False 时也会跑，顺手就能拿到最近几天）。
+    """
+    if any(s.startswith('sh') for s in symbols):
+        sh_codes = _sh_codes_from(symbols)
+        have_sh = sum(1 for d in days if any(c in days[d] for c in sh_codes))
+        if have_sh < PERCENTILE_DAYS:
+            return True
+    if any(s.startswith('sz') for s in symbols):
+        if _szse_have_days(days, symbols) < PERCENTILE_DAYS:
+            return True
+    return False
+
+
+def _maybe_background_backfill(symbols):
+    """历史不足时异步补一次，立刻返回。返回 True 表示「正在补」。"""
+    try:
+        payload = _load()
+        if not _needs_backfill(payload.get('days') or {}, symbols):
+            return False
+        with _BF_LOCK:
+            if _BF_STATE['running']:
+                return True
+            if time.time() - _BF_STATE['lastTs'] < BACKFILL_RETRY_SEC:
+                return False
+            _BF_STATE['running'] = True
+            _BF_STATE['lastTs'] = time.time()
+            _BF_STATE['lastMsg'] = '回补中'
+
+        def _run():
+            t0 = time.time()
+            msg = ''
+            try:
+                p = ensure_history(symbols, allow_backfill=True)
+                n = len(p.get('days') or {})
+                msg = f'补到 {n} 天'
+                print(f'[share] 后台回补完成：{msg}，耗时 {time.time() - t0:.1f}s',
+                      file=sys.stderr, flush=True)
+            except Exception as e:
+                msg = f'失败 {type(e).__name__}: {e}'
+                print(f'[share] 后台回补{msg}', file=sys.stderr, flush=True)
+            finally:
+                with _BF_LOCK:
+                    _BF_STATE['running'] = False
+                    _BF_STATE['lastMsg'] = msg
+                    _BF_STATE['lastCost'] = round(time.time() - t0, 1)
+
+        threading.Thread(target=_run, name='share-backfill', daemon=True).start()
+        return True
+    except Exception:
+        return False
+
+
 def ensure_history(symbols, force_snapshot=False, allow_backfill=True):
     """保证 share_history.json 里有可用的份额序列。
 
     symbols：本次关心的标的（如 ['sh510300', 'sz159915']），只会为它们所在市场做抓取。
-    allow_backfill：是否允许跑历史回补。上交所逐日回补很慢（每个日期一次请求），
-        深交所区间接口在站点抖动时单次可能要 30s。所以**盘中监控应传 False**，
-        只读本地已有数据；回补由 --backfill 单独进程跑，不拖慢实时预警。
+    allow_backfill：是否**同步**跑历史回补。上交所逐日回补要占几秒，深交所站点抖动时
+        单次可能十几秒，所以盘中监控传 False，改为把回补丢到后台线程
+        （_maybe_background_backfill），下一轮请求就能用上。
     返回更新后的 payload。
     """
     payload = _load()
@@ -591,6 +676,9 @@ def ensure_history(symbols, force_snapshot=False, allow_backfill=True):
             _save(payload)
 
     if not allow_backfill:
+        # 只读模式下不改本地数据，但顺手看看历史够不够——不够就起个后台线程补，
+        # 本次调用立刻返回（不阻塞盘中监控）。
+        _maybe_background_backfill(symbols)
         return payload
 
     # 2) 上交所历史回补：本地不足 PERCENTILE_DAYS 天时按日期补齐。
@@ -758,8 +846,9 @@ if __name__ == '__main__':
     if '--status' in sys.argv:
         print(json.dumps(status(), ensure_ascii=False, indent=2))
     elif '--backfill' in sys.argv:
-        # 独立回补进程：盘中监控读这份文件，回补在这里慢慢跑，互不阻塞。
-        # 建议放 crontab，每天收盘后 / 开盘前各跑一次：
+        # 独立回补进程：用于「不想等后台线程、想立刻补满」的场合（如部署后首次上线）。
+        # 日常运行不需要它——监控发现历史不足会自己在后台补。
+        # 如果你更习惯定时任务，也可以放 crontab：
         #   30 8 * * 1-5  cd backend && python3 scripts/etf_share_flow.py --backfill
         syms = _all_watch_symbols()
         print(f'[share] 回补标的 {len(syms)} 只：{",".join(syms[:6])}...',

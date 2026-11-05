@@ -468,6 +468,8 @@ export interface NationalTeamResponse {
     shareAsOfMin?: string | null;
     /** 份额历史累积天数 */
     shareDays: number | null;
+    // 后台自动回补的状态：历史不足时脚本自己补，前端据此提示「回补中」
+    shareBackfill?: { running: boolean; lastMsg: string; lastCost: number | null } | null;
     timestamp: string;
     dataSource: string;
     costMs: number;

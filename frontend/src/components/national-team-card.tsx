@@ -287,7 +287,7 @@ function GroupBlock({ group, rankOffset }: { group: NationalTeamGroup; rankOffse
 /* ---------------- 主组件：汇总头 + 分组卡片列表 ---------------- */
 
 export default function NationalTeamCard({ data }: { data: Data }) {
-  const { summary, groups, marketStatus, timestamp, shareAsOf, shareAsOfMin, shareDays } = data;
+  const { summary, groups, marketStatus, timestamp, shareAsOf, shareAsOfMin, shareDays, shareBackfill } = data;
   const staleCount = data.quoteStaleCount ?? 0;
   const amountKnown = summary.netTotal != null;
   const sharesKnown = summary.netSharesTotal != null;
@@ -360,9 +360,17 @@ export default function NationalTeamCard({ data }: { data: Data }) {
             <span className="text-[10px] text-slate-400">
               净申购 {summary.netInflowCount} / 净赎回 {summary.netOutflowCount}
             </span>
+            {shareDays != null && shareDays < 20 && (
+              <span
+                className="text-[9px] font-medium text-amber-600 bg-amber-50 ring-1 ring-amber-200 rounded px-1.5 py-0.5"
+                title="份额历史不足 20 天，分位算不出来。脚本已自动在后台补齐，几分钟后刷新即可"
+              >
+                {shareBackfill?.running ? '份额历史回补中' : '份额历史不足'}
+              </span>
+            )}
             <span className="ml-auto text-[9px] text-slate-400 tabular-nums" title={`覆盖 ${summary.netCount} 只`}>
               {asOfRange(shareAsOfMin, shareAsOf)}
-              {shareDays ? ` · 累积 ${shareDays} 日` : ''}
+              {shareDays ? ` · 累积 ${shareDays}${shareDays < 20 ? '/20' : ''} 日` : ''}
             </span>
           </div>
         </div>
