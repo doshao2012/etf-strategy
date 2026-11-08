@@ -14,9 +14,13 @@ import time
 from datetime import datetime, timedelta
 
 # 配置文件路径
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), '..', 'etf_config.json')
+# 运行时数据目录：Docker 里由 ETF_DATA_DIR 指向持久卷（否则每次重建容器数据全丢），
+# 裸机运行不设该变量，仍落在 backend/ 下。
+DATA_DIR = os.environ.get('ETF_DATA_DIR') or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+CONFIG_FILE = os.path.join(DATA_DIR, 'etf_config.json')
 # 历史数据缓存文件
-HISTORY_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'history_cache.json')
+HISTORY_CACHE_FILE = os.path.join(DATA_DIR, 'history_cache.json')
 
 _REALTIME_PREFETCH = {}
 

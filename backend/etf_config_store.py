@@ -7,7 +7,10 @@ from datetime import datetime
 from typing import Optional
 
 # 配置文件路径
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), "etf_config.json")
+# 运行时数据目录：Docker 里由 ETF_DATA_DIR 指向持久卷，否则每次重建容器，
+# 在界面上增删改过的 ETF 列表会退回镜像里的初始版本。
+DATA_DIR = os.environ.get('ETF_DATA_DIR') or os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = os.path.join(DATA_DIR, "etf_config.json")
 
 
 def load_configs() -> list:

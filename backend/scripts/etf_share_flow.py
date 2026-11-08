@@ -63,7 +63,10 @@ import time
 from datetime import datetime, timedelta
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SHARE_FILE = os.path.join(BASE_DIR, 'share_history.json')
+# 运行时数据目录：Docker 里由 ETF_DATA_DIR 指向持久卷（否则每次重建容器份额历史全丢），
+# 裸机运行不设该变量，仍落在 backend/ 下。
+DATA_DIR = os.environ.get('ETF_DATA_DIR') or BASE_DIR
+SHARE_FILE = os.path.join(DATA_DIR, 'share_history.json')
 
 # 分位窗口：60 个交易日 ≈ 3 个月。太短（20 日）正常调仓也会冲高，太长（250 日）会稀释近期异动。
 PERCENTILE_DAYS = 60

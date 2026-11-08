@@ -60,3 +60,6 @@ backend/national_team_cache.json
 
 # ETF 一级市场份额历史（每日抓取累积，属运行时状态，不入库）
 backend/share_history.json
+
+# 自动部署写入的线上 commit（运行时状态，不入库）
+backend/DEPLOY_SHA

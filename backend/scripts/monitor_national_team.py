@@ -62,8 +62,12 @@ MIN_BASE_DAYS = 3          # 少于这么多完整交易日就不出量比（直
 OPEN_QUIET_MIN = 15        # 开盘前 N 分钟不出信号
 TAIL_SWITCH = '14:45'      # 这个时间之后改用全天量比
 
+# 运行时数据目录：Docker 里由 ETF_DATA_DIR 指向持久卷（否则每次重建容器数据全丢），
+# 裸机运行不设该变量，仍落在 backend/ 下。
+DATA_DIR = os.environ.get('ETF_DATA_DIR') or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # ============== 缓存 ==============
-CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+CACHE_DIR = DATA_DIR
 CACHE_FILE = os.path.join(CACHE_DIR, 'national_team_cache.json')
 MINUTE_TTL = 55            # 实时分时缓存秒数（盘中）
 # 历史基准按「日」缓存，不按小时。

@@ -52,8 +52,11 @@ READ_TIMEOUT = 8.0
 HISTORY_DAYS = 1300         # 约 5.2 年交易日，够 5 年曲线 + 余量
 POINTS_PER_DAY = 1          # 每日一个点
 
-HISTORY_CACHE_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), '..', 'cyb_dividend_cache.json')
+# 运行时数据目录：Docker 里由 ETF_DATA_DIR 指向持久卷（否则每次重建容器数据全丢），
+# 裸机运行不设该变量，仍落在 backend/ 下。
+DATA_DIR = os.environ.get('ETF_DATA_DIR') or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+HISTORY_CACHE_FILE = os.path.join(DATA_DIR, 'cyb_dividend_cache.json')
 
 
 def _log(msg):

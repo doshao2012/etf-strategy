@@ -25,8 +25,9 @@ from datetime import datetime, timedelta
 import requests
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HISTORY_FILE = os.path.join(BASE_DIR, 'qqq_history.json')
-UPDATE_META_FILE = os.path.join(BASE_DIR, 'qqq_history_meta.json')
+DATA_DIR = os.environ.get('ETF_DATA_DIR') or BASE_DIR
+HISTORY_FILE = os.path.join(DATA_DIR, 'qqq_history.json')
+UPDATE_META_FILE = os.path.join(DATA_DIR, 'qqq_history_meta.json')
 
 # 腾讯前复权日线：美股需带 .OQ（纳斯达克）后缀，不带后缀只会返回首尾两条
 TENCENT_KLINE = 'http://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get'

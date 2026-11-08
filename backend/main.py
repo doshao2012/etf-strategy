@@ -340,9 +340,21 @@ def _rss_mb():
 
 @app.get("/api/health")
 def health_check():
-    """健康检查"""
+    """健康检查。
+
+    顺带回显线上实际运行的 commit（由 scripts/autodeploy.sh 在构建前写入
+    backend/DEPLOY_SHA），用来确认「推的代码到底生效了没有」，
+    不用 SSH 进容器翻 git log。
+    """
     from datetime import datetime
-    return {"status": "ok", "timestamp": datetime.now().isoformat()}
+    commit = None
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'DEPLOY_SHA'), encoding='utf-8') as f:
+            commit = f.read().strip() or None
+    except Exception:
+        pass
+    return {"status": "ok", "commit": commit, "timestamp": datetime.now().isoformat()}
 
 
 @app.get("/api/debug/perf")

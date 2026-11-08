@@ -31,9 +31,13 @@ MA_PERIOD = 10  # MA周期
 ENE_LOWER_PCT = 0.09  # 下轨偏离度 9%
 
 # 缓存文件路径
-VOLUME_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'volume_cache.json')
-HISTORY_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'history_cache.json')
-KLINE_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'kline_cache.json')
+# 运行时数据目录：Docker 里由 ETF_DATA_DIR 指向持久卷（否则每次重建容器数据全丢），
+# 裸机运行不设该变量，仍落在 backend/ 下。
+DATA_DIR = os.environ.get('ETF_DATA_DIR') or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+VOLUME_CACHE_FILE = os.path.join(DATA_DIR, 'volume_cache.json')
+HISTORY_CACHE_FILE = os.path.join(DATA_DIR, 'history_cache.json')
+KLINE_CACHE_FILE = os.path.join(DATA_DIR, 'kline_cache.json')
 MAX_WORKERS = 20  # 并行请求数
 
 # 内存缓存：K线数据（filter_by_volume 时预取，calculate_oversold_analysis 复用）

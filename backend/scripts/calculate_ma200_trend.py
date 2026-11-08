@@ -33,7 +33,11 @@ UPPER_EXIT = 1.06    # 上轨（低）：从 QQQ 回落到此线以下换回 TQQ
 MA_PERIOD = 200      # 均线周期
 
 # 历史数据文件
-HISTORY_FILE = os.path.join(os.path.dirname(__file__), '..', 'qqq_history.json')
+# 运行时数据目录：Docker 里由 ETF_DATA_DIR 指向持久卷（否则每次重建容器数据全丢），
+# 裸机运行不设该变量，仍落在 backend/ 下。
+DATA_DIR = os.environ.get('ETF_DATA_DIR') or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+HISTORY_FILE = os.path.join(DATA_DIR, 'qqq_history.json')
 
 # 实时行情数据源（按顺序尝试，第一个成功即用）
 
