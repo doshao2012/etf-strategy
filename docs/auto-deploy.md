@@ -33,6 +33,11 @@ sudo systemctl start etf-autodeploy.service
 tail -f logs/deploy.log
 ```
 
+> 如果你的 docker 命令平时要加 sudo（`sudo docker compose build`），**不用改任何东西**。
+> 脚本会自动探测：root 环境下直接用 `docker`，普通用户环境下自动切成 `sudo docker`。
+> 另外 `sudo git pull` 常见的 `dubious ownership` 报错也已处理（脚本会先把仓库加进
+> `safe.directory`），否则 root 操作归属普通用户的仓库时 git 会直接拒绝。
+
 自定义检查间隔（默认 3 分钟）：
 
 ```bash

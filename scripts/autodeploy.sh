@@ -55,22 +55,36 @@ fi
 
 cd "$APP_DIR" || { log "进不去项目目录 $APP_DIR"; exit 1; }
 
+# root 操作「属于其他用户」的仓库时，Git 2.35+ 会以 dubious ownership 直接拒绝，
+# 这在「目录归 ubuntu、git pull 都要 sudo」的机器上必现，不显式放行整个脚本都跑不动。
+git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+
 if [ ! -d .git ]; then
   log "$APP_DIR 不是 git 仓库，无法自动部署"
   exit 1
 fi
 
-# 选择容器编排命令
+# 选择容器编排命令。
+# 有些机器 docker 在 sudo 之后才可用（用户在部署时确实是 `sudo docker compose ...`），
+# 脚本被 systemd 以 root 跑时不需要 sudo，被普通用户手工跑时需要，两种都照顾到。
 if docker compose version >/dev/null 2>&1; then
   DC="docker compose"
+elif command -v docker >/dev/null 2>&1 && sudo -n docker compose version >/dev/null 2>&1; then
+  DC="sudo docker compose"
 elif command -v docker-compose >/dev/null 2>&1; then
   DC="docker-compose"
 else
   DC=""
 fi
 
+# 前端 80 端口是主要入口；后端 3000 是兜底（前端容器挂了但后端还行时，
+# 说明代码本身没问题，不该判成「部署失败」）
 healthy() {
-  curl -fsS -m 6 "$HEALTH_URL" >/dev/null 2>&1
+  curl -fsS -m 6 "$HEALTH_URL" >/dev/null 2>&1 && return 0
+  if [ "$HEALTH_URL" = "http://127.0.0.1/api/health" ]; then
+    curl -fsS -m 6 http://127.0.0.1:3000/api/health >/dev/null 2>&1 && return 0
+  fi
+  return 1
 }
 
 wait_healthy() {
