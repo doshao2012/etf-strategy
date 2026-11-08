@@ -216,6 +216,33 @@ export default function CybDividendCard({ data }: { data: Data }) {
   // 不能放在 {cond && ...} 里（否则 recharts 会丢弃整块）。
   const thr = spreadView?.thresholds ?? { p10: 0, p30: 0, p70: 0, p90: 0 };
 
+  // 分位线标签：自己画 <text>，不用 recharts 的 position ——
+  // insideTopLeft/BottomLeft 是按"标签左边缘"定位且不留右侧余量，
+  // 放到右边会被 SVG 边界裁掉半个字。
+  // 这里左标签贴绘图区左边缘（文字基线在线的下方），右标签贴右边缘（基线在线上方），
+  // 再用白描边（paintOrder 保证描边在字下面）保证压在折线上也读得清。
+  const pctLabel = (text: string, color: string, side: 'left' | 'right') => (props: any) => {
+    const vb = props?.viewBox || {};
+    const x0 = Number(vb.x ?? 0);
+    const w = Number(vb.width ?? 0);
+    const y0 = Number(vb.y ?? 0);
+    return (
+      <text
+        x={side === 'left' ? x0 + 4 : x0 + w + 4}
+        y={y0 + (side === 'left' ? 11 : -4)}
+        textAnchor="start"
+        fontSize={10}
+        fill={color}
+        stroke="#ffffff"
+        strokeWidth={3}
+        strokeLinejoin="round"
+        style={{ paintOrder: 'stroke' }}
+      >
+        {text}
+      </text>
+    );
+  };
+
   return (
     <Card className="mb-3 bg-white border border-slate-200 shadow-sm">
       <CardContent className="p-4">
@@ -520,7 +547,7 @@ export default function CybDividendCard({ data }: { data: Data }) {
                 {/* 必须用 ComposedChart：LineChart 只认 <Line>，会忽略
                     ReferenceArea / ReferenceLine，导致分档色带和 4 条分位虚线全都不渲染。
                     上面那张比值图用的就是 ComposedChart，所以它的阈值线一直正常。 */}
-                <ComposedChart data={bandedPtsSmooth} margin={{ top: 6, right: 8, bottom: 0, left: 0 }}>
+                <ComposedChart data={bandedPtsSmooth} margin={{ top: 6, right: 76, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
                   <XAxis
                     dataKey="day"
@@ -563,15 +590,20 @@ export default function CybDividendCard({ data }: { data: Data }) {
                   <ReferenceArea y1={thr.p70} y2={thr.p90} fill={SPREAD_BAND_STYLE.skyblue.area} />
                   <ReferenceArea y1={thr.p90} y2={spreadYDomain[1]} fill={SPREAD_BAND_STYLE.green.area} />
 
-                  {/* 四条分位分割线：p10 红 / p30 黄 / p70 蓝 / p90 天蓝 */}
+                  {/* 四条分位分割线：p10 红 / p30 黄 / p70 蓝 / p90 天蓝
+                      标签一律左右交错（p10、p70 走左下，p30、p90 走右上）：
+                      相邻两条线的分位值可能非常接近，比如沪深300 的 p70=5.74 与
+                      p90=6.25 只差 0.5，折算到 250px 高的图上不到 12px，
+                      四条都靠左会直接叠成一团（标签高 12px）。
+                      水平错开是唯一不依赖像素估算、切 10年/5年 与不同标的都成立的办法。 */}
                   <ReferenceLine y={thr.p10} stroke={SPREAD_BAND_STYLE.red.color} strokeDasharray="5 3" strokeWidth={1} strokeOpacity={0.8}
-                    label={{ value: `10% 分位 ${thr.p10.toFixed(2)}`, position: 'insideBottomLeft', fontSize: 10, fill: SPREAD_BAND_STYLE.red.color }} />
+                    label={pctLabel(`10% 分位 ${thr.p10.toFixed(2)}`, SPREAD_BAND_STYLE.red.color, 'left')} />
                   <ReferenceLine y={thr.p30} stroke={SPREAD_BAND_STYLE.yellow.color} strokeDasharray="5 3" strokeWidth={1} strokeOpacity={0.8}
-                    label={{ value: `30% 分位 ${thr.p30.toFixed(2)}`, position: 'insideTopLeft', fontSize: 10, fill: SPREAD_BAND_STYLE.yellow.color }} />
+                    label={pctLabel(`30% 分位 ${thr.p30.toFixed(2)}`, SPREAD_BAND_STYLE.yellow.color, 'right')} />
                   <ReferenceLine y={thr.p70} stroke={SPREAD_BAND_STYLE.deepblue.color} strokeDasharray="5 3" strokeWidth={1} strokeOpacity={0.8}
-                    label={{ value: `70% 分位 ${thr.p70.toFixed(2)}`, position: 'insideBottomLeft', fontSize: 10, fill: SPREAD_BAND_STYLE.deepblue.color }} />
+                    label={pctLabel(`70% 分位 ${thr.p70.toFixed(2)}`, SPREAD_BAND_STYLE.deepblue.color, 'left')} />
                   <ReferenceLine y={thr.p90} stroke={SPREAD_BAND_STYLE.skyblue.color} strokeDasharray="5 3" strokeWidth={1} strokeOpacity={0.8}
-                    label={{ value: `90% 分位 ${thr.p90.toFixed(2)}`, position: 'insideTopLeft', fontSize: 10, fill: SPREAD_BAND_STYLE.skyblue.color }} />
+                    label={pctLabel(`90% 分位 ${thr.p90.toFixed(2)}`, SPREAD_BAND_STYLE.skyblue.color, 'right')} />
                   <ReferenceLine y={0} stroke="#cbd5e1" strokeWidth={1} />
 
                   {/* 五条分档线，各自只画自己那一段 */}
