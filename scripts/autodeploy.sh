@@ -147,6 +147,9 @@ if [ "$LOCAL" = "$TARGET" ] && [ "$MODE" != "force" ]; then
     exit 0
   fi
   if healthy; then
+    # 安静退出，但留个心跳：不然"到底有没有在定时跑"无从判断
+    printf '%s %s 无变化·健康\n' "$(date '+%F %T')" "${LOCAL:0:7}" \
+      > "$APP_DIR/logs/last-check" 2>/dev/null || true
     exit 0
   fi
   # 代码没变但服务不健康：可能容器挂了 / 宿主机重启过
