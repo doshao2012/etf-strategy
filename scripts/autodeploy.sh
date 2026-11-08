@@ -77,14 +77,21 @@ else
   DC=""
 fi
 
-# 前端 80 端口是主要入口；后端 3000 是兜底（前端容器挂了但后端还行时，
-# 说明代码本身没问题，不该判成「部署失败」）
+# 前端 80 是用户入口，后端 3000 才反映「代码是否真的活着」（它的 /api/health
+# 会带上 commit）。后端端口可达时它的状态必须正常；端口根本不通（某些部署没
+# 映射 3000）就跳过这一项，只认前端入口，避免误判成部署失败。
+BACKEND_HEALTH_URL="${BACKEND_HEALTH_URL:-http://127.0.0.1:3000/api/health}"
+
 healthy() {
-  curl -fsS -m 6 "$HEALTH_URL" >/dev/null 2>&1 && return 0
-  if [ "$HEALTH_URL" = "http://127.0.0.1/api/health" ]; then
-    curl -fsS -m 6 http://127.0.0.1:3000/api/health >/dev/null 2>&1 && return 0
+  local code
+  code=$(curl -s -m 6 -o /dev/null -w '%{http_code}' "$BACKEND_HEALTH_URL" 2>/dev/null || echo 000)
+  if [ -z "$code" ]; then code=000; fi
+  if [ "$code" != "000" ] && [ "$code" != "200" ]; then
+    return 1
   fi
-  return 1
+  code=$(curl -s -m 6 -o /dev/null -w '%{http_code}' "$HEALTH_URL" 2>/dev/null || echo 000)
+  if [ -z "$code" ]; then code=000; fi
+  [ "$code" = "200" ]
 }
 
 wait_healthy() {
