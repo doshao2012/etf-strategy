@@ -48,10 +48,11 @@ fi
 
 # ------------------------------------------------------- 前置检查（不阻断）
 command -v git >/dev/null 2>&1 || die "没装 git"
-if docker compose version >/dev/null 2>&1 || command -v docker-compose >/dev/null 2>&1; then
-  say "检测到 Docker"
+if (docker info >/dev/null 2>&1 || sudo -n docker info >/dev/null 2>&1) \
+   && (docker compose version >/dev/null 2>&1 || command -v docker-compose >/dev/null 2>&1); then
+  say "检测到 Docker（daemon 可连接）"
 else
-  warn "没检测到 Docker：将以裸机模式运行，需要你自己提供 scripts/deploy-hook.sh"
+  warn "没检测到可用的 Docker（或 daemon 连不上）：将以裸机模式运行，需要 scripts/deploy-hook.sh"
 fi
 if ! command -v curl >/dev/null 2>&1; then
   die "没装 curl（健康检查要用）"

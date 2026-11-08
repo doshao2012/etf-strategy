@@ -65,16 +65,30 @@ if [ ! -d .git ]; then
 fi
 
 # 选择容器编排命令。
-# 有些机器 docker 在 sudo 之后才可用（用户在部署时确实是 `sudo docker compose ...`），
-# 脚本被 systemd 以 root 跑时不需要 sudo，被普通用户手工跑时需要，两种都照顾到。
+# 注意不能用 `docker compose version` 探测权限——那是纯客户端命令，不连 daemon，
+# 普通用户跑它照样成功，真正 build 时才 permission denied（线上踩过）。
+# 必须用 `docker info` 确认能连上 daemon，再决定要不要加 sudo。
+compose_cmd=""
 if docker compose version >/dev/null 2>&1; then
-  DC="docker compose"
-elif command -v docker >/dev/null 2>&1 && sudo -n docker compose version >/dev/null 2>&1; then
-  DC="sudo docker compose"
+  compose_cmd="docker compose"
 elif command -v docker-compose >/dev/null 2>&1; then
-  DC="docker-compose"
+  compose_cmd="docker-compose"
+fi
+
+if [ -n "$compose_cmd" ]; then
+  if docker info >/dev/null 2>&1; then
+    DC="$compose_cmd"
+  elif sudo -n docker info >/dev/null 2>&1; then
+    DC="sudo $compose_cmd"
+  else
+    DC=""
+  fi
 else
   DC=""
+fi
+
+if [ -z "$DC" ] && [ -n "$compose_cmd" ]; then
+  log "检测到 docker 但无法连接 daemon（当前身份 $(id -un)），需要免密 sudo 或加入 docker 组"
 fi
 
 # 前端 80 是用户入口，后端 3000 才反映「代码是否真的活着」（它的 /api/health
