@@ -178,6 +178,16 @@ NEW="$(git rev-parse --short HEAD)"
 log "代码已更新到 $NEW"
 git log --oneline -1 | tee -a "$LOG_FILE" >&2
 
+# 以 root 跑时，git 新建的文件会归 root 所有——日积月累之后普通用户就再也
+# pull 不动了（典型报错 "insufficient permission for adding an object"）。
+# 所以每次更新完把属主还给原来的主人。
+if [ "$(id -u)" -eq 0 ]; then
+  owner="$(stat -c '%u:%g' "$APP_DIR" 2>/dev/null || echo '')"
+  if [ -n "$owner" ] && [ "$owner" != "0:0" ]; then
+    chown -R "$owner" "$APP_DIR" 2>/dev/null || true
+  fi
+fi
+
 # 供 /api/health 显示线上跑的是哪个 commit
 printf '%s\n' "$NEW" > "$APP_DIR/backend/DEPLOY_SHA"
 

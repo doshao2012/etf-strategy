@@ -57,9 +57,24 @@ if ! command -v curl >/dev/null 2>&1; then
   die "没装 curl（健康检查要用）"
 fi
 
+# 定时任务以谁的身份跑：优先仓库属主。root 跑 git pull 会把新文件变成 root 所有，
+# 攒久了普通用户就 pull 不动（典型 "insufficient permission for adding an object"）。
+RUN_USER="$(stat -c '%U' "$APP_DIR")"
+RUN_GROUP="$(stat -c '%G' "$APP_DIR")"
+if [ "$RUN_USER" != "root" ]; then
+  if sudo -u "$RUN_USER" sudo -n docker info >/dev/null 2>&1; then
+    say "以 $RUN_USER 身份运行（docker 走免密 sudo，文件属主保持不变）"
+  else
+    warn "用户 $RUN_USER 不能免密执行 sudo docker —— 定时任务改用 root"
+    warn "如需以 $RUN_USER 运行，先放开 docker 的免密 sudo："
+    warn "  echo '$RUN_USER ALL=(ALL) NOPASSWD: $(command -v docker || echo /usr/bin/docker)' | sudo tee /etc/sudoers.d/etf-deploy"
+    RUN_USER="root"; RUN_GROUP="root"
+  fi
+fi
+
 # 先跑一次，把问题暴露在安装阶段
 say "先手动跑一次，确认能正常部署"
-if "$APP_DIR/scripts/autodeploy.sh" --check; then
+if sudo -u "$RUN_USER" env APP_DIR="$APP_DIR" "$APP_DIR/scripts/autodeploy.sh" --check; then
   say "自检通过"
 else
   warn "自检没通过（可能只是暂时拉不到远端），不影响安装，后面看日志"
@@ -77,8 +92,11 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+User=$RUN_USER
+Group=$RUN_GROUP
 WorkingDirectory=$APP_DIR
 Environment=APP_DIR=$APP_DIR
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=$APP_DIR/scripts/autodeploy.sh
 TimeoutStartSec=1800
 Nice=10
@@ -110,7 +128,7 @@ elif command -v crontab >/dev/null 2>&1 || [ -d /etc/cron.d ]; then
 # ETF 策略站自动部署（由 install-autodeploy.sh 生成）
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-*/${INTERVAL} * * * * root APP_DIR=$APP_DIR $APP_DIR/scripts/autodeploy.sh >/dev/null 2>&1
+*/${INTERVAL} * * * * $RUN_USER APP_DIR=$APP_DIR $APP_DIR/scripts/autodeploy.sh >/dev/null 2>&1
 EOF
   chmod 644 "/etc/cron.d/$UNIT_NAME"
   say "已写入 /etc/cron.d/$UNIT_NAME"
