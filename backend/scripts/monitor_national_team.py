@@ -1012,6 +1012,11 @@ def main():
     # 不能让金额缺失把整条汇总一起拖没（那正是 11-05 页面上汇总区消失的原因）。
     share_rows = [x for x in flat if x.get('netShares') is not None]
     net_rows = [x for x in share_rows if x.get('netAmount') is not None]
+    # 近 5 日金额是「5 天里任一天缺收盘价就整体为 None」，与 netAmount 是否存在无关。
+    # 直接 sum 会踩到 None → TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'，
+    # 整条接口 500（2026-11-08 线上就是这样挂的）。这里先过滤再求和。
+    n5_rows = [x for x in net_rows if x.get('net5Amount') is not None]
+    sh5_rows = [x for x in share_rows if x.get('net5Shares') is not None]
     summary = {
         'strongCount': sum(1 for x in flat if x.get('state') == '显著放量'),
         'alertCount': sum(1 for x in flat if x.get('state') in ('显著放量', '放量')),
@@ -1020,13 +1025,13 @@ def main():
         'avgRatio': round(sum(x['ratio'] for x in ok_rows) / len(ok_rows), 3) if ok_rows else None,
         # 一级市场：全样本合计净申赎（正=净申购）
         'netTotal': round(sum(x['netAmount'] for x in net_rows), 0) if net_rows else None,
-        'netTotal5': round(sum(x['net5Amount'] for x in net_rows), 0) if net_rows else None,
+        'netTotal5': (round(sum(x['net5Amount'] for x in n5_rows), 0)
+                      if n5_rows else None),
         # 份额合计：与金额并列，用于对照「金额大到底是申赎多还是单价高」
         'netSharesTotal': (round(sum(x['netShares'] for x in share_rows), 0)
                            if share_rows else None),
-        'netSharesTotal5': (round(sum(x['net5Shares'] for x in share_rows
-                                      if x.get('net5Shares') is not None), 0)
-                            if share_rows else None),
+        'netSharesTotal5': (round(sum(x['net5Shares'] for x in sh5_rows), 0)
+                            if sh5_rows else None),
         'netInflowCount': sum(1 for x in share_rows if x['netShares'] > 0),
         'netOutflowCount': sum(1 for x in share_rows if x['netShares'] < 0),
         'netCount': len(share_rows),

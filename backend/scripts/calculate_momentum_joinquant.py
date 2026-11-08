@@ -10,6 +10,7 @@ import json
 import os
 import requests
 import re
+import time
 from datetime import datetime, timedelta
 
 # 配置文件路径
@@ -18,6 +19,13 @@ CONFIG_FILE = os.path.join(os.path.dirname(__file__), '..', 'etf_config.json')
 HISTORY_CACHE_FILE = os.path.join(os.path.dirname(__file__), '..', 'history_cache.json')
 
 _REALTIME_PREFETCH = {}
+
+# K线接口熔断：proxy.finance.qq.com 在部分网络下不可达（但 qt.gtimg.cn 通），
+# 不通时每只都要等满超时，10 只就是 100 多秒。连续失败 2 只就熔断 5 分钟，
+# 期间直接用本地旧缓存，等下一次请求再探一次。
+_KLINE_NET_FAILS = 0
+_KLINE_NET_DEAD_UNTIL = 0.0
+_KLINE_TIMEOUT = 8
 
 
 def prefetch_realtime(codes):
@@ -92,80 +100,111 @@ def get_realtime_price(market, code):
         return None, None, None, None, None
 
 def load_history_cache():
-    """加载历史数据缓存"""
+    """加载历史数据缓存（损坏时不再静默吞掉）"""
     try:
         if os.path.exists(HISTORY_CACHE_FILE):
             with open(HISTORY_CACHE_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
-    except:
-        pass
+    except Exception as e:
+        # 原来这里是裸 except: pass。文件被写坏时缓存全部静默消失，
+        # 所有 K 线被迫重拉，表现是"某天突然整个策略打不开"，且没有任何线索。
+        print(f"⚠ history_cache.json 读取失败（{type(e).__name__}: {e}），"
+              f"本次按空缓存处理", file=sys.stderr)
     return {}
 
 def save_history_cache(cache):
-    """保存历史数据缓存"""
+    """保存历史数据缓存（原子写）。
+
+    原来是直接 open('w') 覆盖写。本脚本跑在常驻 worker 池的**多个进程**里，
+    并发落盘一旦交错，history_cache.json 就是半截 JSON；下次 load 被 except
+    吞掉返回 {}，全部缓存静默作废、所有 K 线被迫重拉——撞上数据源限流就整页 500。
+    改成先写 pid 专属临时文件再 os.replace（同文件系统内是原子的）。
+    """
     try:
-        with open(HISTORY_CACHE_FILE, 'w', encoding='utf-8') as f:
+        tmp = f'{HISTORY_CACHE_FILE}.tmp.{os.getpid()}'
+        with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(cache, f, ensure_ascii=False)
+        os.replace(tmp, HISTORY_CACHE_FILE)
     except Exception as e:
         print(f"保存历史缓存失败: {e}", file=sys.stderr)
 
+def _rows_of(data, days):
+    """统一成 {day, close, high, low} 列表"""
+    return [{'day': it['day'], 'close': float(it['close']),
+             'high': float(it['high']), 'low': float(it['low'])}
+            for it in data[-days:]]
+
+
 def get_historical_prices(market, code, days=30):
-    """获取历史K线数据（按天缓存）"""
+    """获取历史K线数据（按天缓存 + 旧缓存兜底）。
+
+    缓存策略：
+      1. 当天已拉过 → 直接用（省一次往返）
+      2. 否则联网拉腾讯，成功就写缓存
+      3. **联网失败时退回上一次成功拉到的缓存**（不管它是哪天）
+
+    第 3 条是关键：周末、节假日、数据源临时限流时，K 线历史并不会变，
+    拿两三天前的缓存算动量完全成立。原实现失败就直接 return []，
+    十只标的全空 → 接口只剩一句「未能获取ETF策略数据」，
+    2026-11-08（周日）整页打不开就是这么来的。
+    """
     today = datetime.now().strftime('%Y-%m-%d')
     cache_key = f"{market}_{code}"
-    
-    # 检查缓存
+
     cache = load_history_cache()
-    cached_data = cache.get(cache_key)
-    
-    if cached_data and cached_data.get('date') == today:
-        data = cached_data.get('data', [])
-        if len(data) >= days:
-            print(f"使用缓存的历史数据: {code}", file=sys.stderr)
-            return [{'day': item['day'], 'close': float(item['close']), 'high': float(item['high']), 'low': float(item['low'])} for item in data[-days:]]
-        print(f"缓存数据不足({len(data)}条<{days}条)，重新获取: {code}", file=sys.stderr)
-    
-    # 从腾讯API获取历史数据（前复权）
+    cached = cache.get(cache_key) or {}
+    cached_rows = cached.get('data') or []
+    cached_date = cached.get('date') or ''
+
+    if cached_date == today and len(cached_rows) >= days:
+        print(f"使用缓存的历史数据: {code}", file=sys.stderr)
+        return _rows_of(cached_rows, days)
+
+    global _KLINE_NET_FAILS, _KLINE_NET_DEAD_UNTIL
+    if (_KLINE_NET_DEAD_UNTIL and time.time() < _KLINE_NET_DEAD_UNTIL
+            and len(cached_rows) >= days):
+        return _rows_of(cached_rows, days)
+
+    symbol = f"{market}{code}"
+    url = (f"http://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get"
+           f"?param={symbol},day,,,{days + 30},qfq")
+    err = ''
     try:
-        symbol = f"{market}{code}"
-        url = f"http://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get?param={symbol},day,,,{days+30},qfq"
-        
-        response = requests.get(url, timeout=15)
+        response = requests.get(url, timeout=_KLINE_TIMEOUT)
         if response.status_code != 200:
-            print(f"腾讯API返回异常状态码 {response.status_code}: {code}", file=sys.stderr)
-            return []
-        
-        result = response.json()
-        klines = result.get('data', {}).get(symbol, {}).get('qfqday', [])
-        # 部分ETF（如新上市）没有前复权数据，降级使用不复权
-        if not klines:
-            klines = result.get('data', {}).get(symbol, {}).get('day', [])
-        if not klines:
-            print(f"腾讯API返回数据为空: {code}", file=sys.stderr)
-            return []
-        
-        # 转换为统一格式：{day, close, high, low, open, volume}
-        data = []
-        for k in klines:
-            data.append({
-                'day': k[0],
-                'close': k[2],
-                'high': k[3],
-                'low': k[4],
-                'open': k[1],
-                'volume': k[5]
-            })
-        
-        # 保存到缓存
-        cache[cache_key] = {'date': today, 'data': data}
-        save_history_cache(cache)
-        
-        # 返回指定天数的数据（含 day、high、low 字段）
-        return [{'day': item['day'], 'close': float(item['close']), 'high': float(item['high']), 'low': float(item['low'])} for item in data[-days:]]
-        
+            err = f'HTTP {response.status_code}'
+        else:
+            result = response.json()
+            node = (result.get('data') or {}).get(symbol) or {}
+            # 部分 ETF（如新上市）没有前复权数据，降级用不复权
+            klines = node.get('qfqday') or node.get('day') or []
+            if not klines:
+                err = '返回数据为空'
+            else:
+                data = [{'day': k[0], 'close': k[2], 'high': k[3],
+                         'low': k[4], 'open': k[1], 'volume': k[5]}
+                        for k in klines]
+                cache[cache_key] = {'date': today, 'data': data}
+                save_history_cache(cache)
+                _KLINE_NET_FAILS = 0
+                return _rows_of(data, days)
     except Exception as e:
-        print(f"获取历史数据失败: {e}", file=sys.stderr)
-        return []
+        err = f'{type(e).__name__}: {e}'
+
+    _KLINE_NET_FAILS += 1
+    if _KLINE_NET_FAILS >= 2:
+        _KLINE_NET_DEAD_UNTIL = time.time() + 300
+        print(f"⚠ K线接口连续失败 {_KLINE_NET_FAILS} 次，熔断 5 分钟，"
+              f"期间只用本地缓存", file=sys.stderr)
+
+    if len(cached_rows) >= days:
+        print(f"⚠ {code} 拉取失败（{err}），用 {cached_date} 的旧缓存兜底"
+              f"（{len(cached_rows)} 条）", file=sys.stderr)
+        return _rows_of(cached_rows, days)
+
+    print(f"获取历史数据失败 {code}: {err}", file=sys.stderr)
+    return []
+
 
 def load_config():
     """加载ETF配置和基金数据"""
@@ -477,6 +516,19 @@ def main():
         recommend = valid_etfs[0]['code']
 
     # 输出结果
+    # 一只都没算出来时必须说清原因。原来照样返回 code=200 + 空 etfs，
+    # 上层只能回一句笼统的「未能获取ETF策略数据」，看不出是数据源挂了还是配置空了。
+    if not results:
+        output = {
+            'code': 500,
+            'message': (f'未能获取ETF策略数据：{len(etfs)} 只标的的历史K线全部为空'
+                        f'（腾讯K线接口不可用，且本地无可用缓存）。'
+                        f'配置数 {len(etfs)}，请检查 history_cache.json 与网络'),
+            'data': None,
+        }
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+        return
+
     output = {
         'code': 200,
         'message': 'success',
