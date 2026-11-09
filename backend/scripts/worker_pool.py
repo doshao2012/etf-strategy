@@ -50,6 +50,12 @@ SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 POOL_LOG = os.environ.get('POOL_LOG', '1') != '0'
 _BOOT_SEQ = [0]
 
+# Worker 回收阈值（见 Worker._after_run 的说明）。
+# 300 次 ≈ 线上 5 小时的调用量，6 小时兜底；一次重建只要 0.2 秒，
+# 相比"跑两天后整个进程坏掉、三个策略同时没数据"，这个代价可以忽略。
+MAX_RUNS_PER_WORKER = int(os.environ.get('WORKER_MAX_RUNS', '300'))
+MAX_AGE_PER_WORKER = float(os.environ.get('WORKER_MAX_AGE_HOURS', '6')) * 3600
+
 
 def _plog(msg):
     if not POOL_LOG:
@@ -113,6 +119,17 @@ class Worker:
     def __init__(self):
         self.proc = None
         self.lock = threading.Lock()
+        # 执行次数与"中毒"标记，用于及时换掉跑久了的进程。
+        #
+        # 线上事故（2026-11-09）：Worker#1 连续跑了 24 小时后，进程内每一次网络请求
+        # 都开始报 "RecursionError: maximum recursion depth exceeded while calling
+        # a Python object"，表现为超跌 / 美股 / 国家队三个接口同时拿不到数据，
+        # 而新起的进程跑同样的脚本完全正常 —— 是进程级的状态损坏，
+        # 多半是某次深层调用链里递归溢出后该线程的递归计数没恢复，
+        # 之后每次函数调用都被判超限。进程内修不了，只能换进程。
+        self.runs = 0
+        self.poisoned = False
+        self.poison_reason = ''
         self._start()
 
     def _start(self):
@@ -138,11 +155,20 @@ class Worker:
         threading.Thread(target=self._pump_stderr, args=(self.seq,), daemon=True).start()
 
     def _pump_stderr(self, seq):
-        """把 worker 的 stderr 转发到主进程日志，带 Worker 编号前缀。"""
+        """把 worker 的 stderr 转发到主进程日志，带 Worker 编号前缀。
+
+        顺带盯一眼 RecursionError：这种错误一旦在一个长跑进程里出现，
+        后面同进程的所有请求都会复现（见 __init__ 里的说明），
+        标记下来让 run() 结束后把进程换掉，别让它继续拖累下个请求。
+        """
         try:
             for line in self.proc.stderr:
                 line = line.rstrip('\n')
                 if line:
+                    if 'RecursionError' in line and not self.poisoned:
+                        self.poisoned = True
+                        self.poison_reason = line[:140]
+                        _plog(f"Worker#{seq} 出现递归错误，执行完本次任务后回收")
                     print(f"[W{seq}] {line}", flush=True)
         except Exception:
             pass
@@ -171,6 +197,12 @@ class Worker:
             pass
 
     def run(self, path, args, timeout):
+        # 上一轮已经中毒：先换一个干净进程，别拿坏进程去跑新请求
+        if self.poisoned:
+            _plog(f"Worker#{getattr(self, 'seq', '?')} 重建（上一轮出现递归错误）")
+            self.kill()
+            self.poisoned = False
+            self.poison_reason = ''
         if not self.alive():
             self._start()
         fd, out_path = tempfile.mkstemp(suffix='.json')
@@ -197,6 +229,32 @@ class Worker:
                 os.unlink(out_path)
             except Exception:
                 pass
+            self._after_run()
+
+    def _after_run(self):
+        """一次任务执行完之后决定要不要把这个进程换掉。
+
+        两条理由：
+        1. 出现过 RecursionError —— 进程已处于不可恢复状态，必须换；
+        2. 跑得太久/太多次 —— 长跑进程容易攒下内存碎片、fd、线程泄漏，
+           与其等它某天突然坏掉，不如按上限主动换新（启动只要 0.2 秒）。
+        """
+        self.runs += 1
+        age = time.time() - getattr(self, 'born', time.time())
+        reason = ''
+        if self.poisoned:
+            reason = f'递归错误（{self.poison_reason}）'
+        elif self.runs >= MAX_RUNS_PER_WORKER:
+            reason = f'已执行 {self.runs} 次'
+        elif age >= MAX_AGE_PER_WORKER:
+            reason = f'已存活 {age / 3600:.1f} 小时'
+        if not reason:
+            return
+        _plog(f"Worker#{getattr(self, 'seq', '?')} 回收：{reason}；下一个请求会重建")
+        self.kill()
+        self.poisoned = False
+        self.poison_reason = ''
+        self.runs = 0
 
 
 class WorkerPool:
