@@ -3,6 +3,7 @@ ETF 策略服务 - FastAPI 后端
 """
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from etf_config_store import load_configs, get_config_by_id, update_config, create_config, delete_config
@@ -14,6 +15,11 @@ import time
 _BOOT_TS = time.time()
 
 app = FastAPI(title="ETF 策略服务", version="1.0.0")
+
+# 响应压缩：市场情绪接口一次返回 1.1MB JSON（10 年日频点位），
+# 不压缩时在 1~5Mbps 的公网出口上要传 10~25 秒，页面表现为"一直转圈"。
+# 这类纯文本 JSON 的 gzip 压缩率约 85%，压完 150KB 左右。
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # CORS 配置
 app.add_middleware(
