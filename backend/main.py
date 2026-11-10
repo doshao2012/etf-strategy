@@ -290,9 +290,56 @@ def get_cyb_dividend_strategy():
     return _trace("cyb-dividend", _compute_cyb_dividend)
 
 
+# 市场情绪接口的响应瘦身。
+#
+# 这个接口一次返回 1.16MB：spread 里每个标的的 points 有 240KB，
+# windows['10y'].points 又是同一份数据的拷贝（再 240KB），5y 又是 10y 的尾部（120KB），
+# 两个标的乘下来就 1.2MB —— 而图表宽度只有一千像素左右，十年的日频点属于严重过采样。
+#
+# 在 1~5Mbps 的云服务器出口上，1.16MB 要传 10~25 秒，页面表现为"市场情绪一直转圈"。
+# 这里按 3 个交易日取样（保留最后一个点），体积降到约 1/4，肉眼看不出一字形差别。
+_POINT_STEP = 3
+
+
+def _downsample(pts, step=_POINT_STEP):
+    if not isinstance(pts, list) or len(pts) <= step * 2:
+        return pts
+    out = pts[::step]
+    if out[-1] is not pts[-1]:
+        out.append(pts[-1])
+    return out
+
+
+def _slim_cyb_dividend(payload):
+    """删掉重复的 points、把各窗口点位按 3 个交易日降采样。
+
+    只动点位数组；分位阈值、stats、distribution 这些都是标量，保持原样，
+    所以分位着色和结论完全不受影响。
+    """
+    try:
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            return payload
+        if isinstance(data.get("series"), list):
+            data["series"] = _downsample(data["series"])
+        for opt in (data.get("spread") or {}).get("options") or []:
+            if not isinstance(opt, dict):
+                continue
+            # 与 windows['10y'].points 完全重复，前端优先读 windows，这里直接清空
+            if "points" in opt:
+                opt["points"] = []
+            for w in (opt.get("windows") or {}).values():
+                if isinstance(w, dict) and "points" in w:
+                    w["points"] = _downsample(w["points"])
+        return payload
+    except Exception as e:
+        print(f"[市场情绪] 响应瘦身失败，返回原始数据: {e}", file=sys.stderr)
+        return payload
+
+
 def _compute_cyb_dividend():
     try:
-        return _run_script("calculate_cyb_dividend.py", timeout=30)
+        return _slim_cyb_dividend(_run_script("calculate_cyb_dividend.py", timeout=30))
     except Exception as e:
         return {"code": 500, "message": str(e)}
 
