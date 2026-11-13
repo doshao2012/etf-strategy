@@ -111,6 +111,10 @@ SINA_QUOTE = 'https://hq.sinajs.cn/list={}'
 # 看起来像"今天特别冷清"，实际是数据源断了，属于最坏的一种误导。
 QUOTE_STALE_MIN = 12
 
+# 时段切换的宽限（分钟）。9:30 / 13:00 / 15:00 刚过的那几分钟，行情源往往
+# 还没推第一笔，报价时间停在上一个时段的末尾属于正常，不该判成"未更新"。
+OPEN_GRACE_MIN = 3
+
 # ============== 监控标的 ==============
 # 全部为日均成交额 10 亿以上的主流宽基 ETF，按跟踪指数分组。
 # 清单是离线核算后固定的（2026-11-04 的 5 日均额），不在运行时动态筛选。
@@ -353,13 +357,41 @@ def quote_stale_reason(now, quote_time):
     # 完全正常，弹「行情未更新」纯属噪音（页面上本来就标着行情属于哪一天）。
     if status in ('休市', '未开盘'):
         return '' if (now.date() - dt.date()).days <= 10 else f'行情停留在 {dt.strftime("%m-%d %H:%M")}'
+
+    t = now.hour * 60 + now.minute
+    hhmm = dt.strftime('%H%M')
+
+    # 午休（11:30~13:00）行情本来就停在上午收盘，最长会静止 90 分钟。
+    # 之前这里和盘中共用 QUOTE_STALE_MIN=12 分钟，导致 11:42 之后全表必然报
+    # 「行情已 N 分钟未更新」并把现价/成交额全部置空——纯属误报。
+    # 午休只要上午的数据到位（报价时间不早于 11:30）就算新鲜。
+    if status == '午休':
+        if dt.date() < now.date():
+            return f'行情停留在 {dt.strftime("%m-%d %H:%M")}'
+        if hhmm < '1130':
+            return f'行情停在 {dt.strftime("%H:%M")}，上午收盘数据未到'
+        return ''
+
     if dt.date() < now.date():
+        # 9:30 刚开盘的几秒，数据源常还挂着上一交易日的收盘快照，属正常
+        if status == '开盘观察中' and t < AM_OPEN + OPEN_GRACE_MIN:
+            return ''
         return f'行情停留在 {dt.strftime("%m-%d %H:%M")}'
     if dt > now + timedelta(minutes=3):
         return ''          # 服务器时钟略快于行情源，不算过期
+    # 13:00 / 15:00 切换的头几分钟，第一笔数据往往还没推过来，
+    # 行情停在上一个时段的末尾是正常的，别急着报"未更新"。
+    if status == '交易中' and AM_CLOSE < t < PM_OPEN + OPEN_GRACE_MIN and hhmm <= '1300':
+        return ''
+    if status == '已收盘' and t < PM_CLOSE + OPEN_GRACE_MIN and hhmm >= '1455':
+        return ''
     age = (now - dt).total_seconds() / 60
-    if status in ('交易中', '开盘观察中', '午休', '尾盘'):
+    if status in ('交易中', '开盘观察中', '尾盘'):
         if age > QUOTE_STALE_MIN:
+            # 下午开盘后仍停在上午收盘：age 里含了 90 分钟休市，说
+            # "已 94 分钟未更新"会让人以为是午休误报，直接点明停在哪一刻。
+            if hhmm <= '1130' and t >= PM_OPEN:
+                return f'下午开盘后行情仍停在 {dt.strftime("%H:%M")}，未更新'
             return f'行情已 {age:.0f} 分钟未更新（停在 {dt.strftime("%H:%M")}）'
         return ''
     if status == '已收盘':
