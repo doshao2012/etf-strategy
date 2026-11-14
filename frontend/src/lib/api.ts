@@ -7,6 +7,8 @@ const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || '').replace(/\/+$/
 export interface ETFMetrics {
   code: string;
   name: string;
+  /** 是否在「建议持仓」候选池内，池外标的只作分数参考 */
+  recommendable?: boolean;
   score: number;
   estimatedScore?: number;
   rSquared: number;
@@ -21,7 +23,8 @@ export interface StrategyResponse {
   code: number;
   data: {
     etfs: ETFMetrics[];
-    recommend: string[];
+    // 后端只在候选池内选一只，可能为空（空仓），不是数组
+    recommend: string | null;
     recommendCode: string | null;
     timestamp: string;
     dataSource: string;
