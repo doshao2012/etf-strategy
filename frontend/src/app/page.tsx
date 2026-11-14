@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { RefreshCw, Settings, Plus, Pencil, Trash2, Shield } from 'lucide-react';
+import { RefreshCw, Plus, Pencil, Trash2, Shield } from 'lucide-react';
 
 type StrategyType = 'rotation' | 'oversold' | 'meanReversion' | 'ma200Trend' | 'cybDividend' | 'nationalTeam';
 
@@ -30,6 +30,9 @@ interface DailySnapshot {
 interface RotationETF {
   code: string;
   name: string;
+  /** 是否在「建议持仓」候选池内（城投债/纳指/黄金/创业板/科创50/科创100/科创200）。
+   *  池外标的照常展示分数，但不参与推荐。 */
+  recommendable?: boolean;
   score: number;
   estimatedScore: number;  // 预估动量得分
   rSquared: number;
@@ -75,7 +78,7 @@ interface RotationResponse {
   code: number;
   data: {
     etfs: RotationETF[];
-    recommend: string[];
+    recommend: string | null;
     recommendCode: string | null;
     timestamp: string;
     dataSource: string;
@@ -83,6 +86,7 @@ interface RotationResponse {
       total: number;
       recommended: number;
       topPick: string;
+      recommendable?: number;
     };
   };
   message: string;
@@ -125,6 +129,14 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
             </div>
           </div>
           <div className="flex items-center gap-1.5">
+            {etf.recommendable === false && (
+              <span
+                className="px-2 py-0.5 text-xs font-medium bg-slate-100 text-slate-500 rounded ring-1 ring-slate-200"
+                title="不在建议持仓候选池内，分数仅供参考"
+              >
+                仅参考
+              </span>
+            )}
             {actionTag && (
               <span className={`px-2 py-0.5 text-xs font-medium ${actionTagColor} text-white rounded`}>
                 {actionTag}
@@ -739,7 +751,6 @@ export default function ETFRotationPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState<string>('');
   const [currentStrategy, setCurrentStrategy] = useState<StrategyType>('rotation');
-  const [showConfig, setShowConfig] = useState(false);
 
   // 请求序号 + 当前策略的 ref，用于在 fetchData 里判断响应是否过期
   const reqSeqRef = useRef(0);
@@ -864,16 +875,6 @@ export default function ETFRotationPage() {
                   <SelectItem value="nationalTeam">国家队监控</SelectItem>
                 </SelectContent>
               </Select>
-
-              <button
-                onClick={() => setShowConfig(true)}
-                className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
-                title="ETF配置"
-              >
-                <Settings className="h-5 w-5 text-slate-500" />
-              </button>
-
-              
 
               <button
                 onClick={fetchData}
@@ -1011,12 +1012,14 @@ export default function ETFRotationPage() {
                       </span>
                       <span className="text-sm font-bold text-emerald-600">
                         {(() => {
-                          // 趋势轮动：找状态正常且排名第一的
+                          // 趋势轮动：后端已按「候选池优先 + 分数降序」排好，
+                          // recommend 只会是候选池 7 只里分数最高、状态正常的那只。
                           if (!isOversoldMode && rotationView?.data.etfs) {
-                            const normalEtf = rotationView.data.etfs.find((etf, idx) => 
-                              idx === 0 && etf.status === '正常'
-                            );
-                            return normalEtf ? normalEtf.name : '空仓';
+                            const code = rotationView.data.recommend;
+                            const pick = code
+                              ? rotationView.data.etfs.find((etf) => etf.code === code)
+                              : null;
+                            return pick ? pick.name : '空仓';
                           }
                           // 超跌策略：使用第一个推荐
                           return isOversoldMode 
@@ -1024,6 +1027,14 @@ export default function ETFRotationPage() {
                             : '空仓';
                         })()}
                       </span>
+                      {!isOversoldMode && (
+                        <span
+                          className="text-[11px] text-slate-400"
+                          title="只在 城投债 / 纳指 / 黄金 / 创业板 / 科创50 / 科创100 / 科创200 中选，其余标的只作分数参考"
+                        >
+                          7 只候选池
+                        </span>
+                      )}
                     </div>
                   )}
                   <span className="text-xs text-slate-400">
@@ -1225,7 +1236,9 @@ export default function ETFRotationPage() {
                   <OversoldCard key={etf.code} etf={etf} rank={index + 1} />
                 ))
               ) : (
-                [...(rotationView?.data.etfs || [])].sort((a, b) => (b.annualReturn ?? -999) - (a.annualReturn ?? -999)).map((etf, index) => (
+                // 后端已按「候选池优先 + 动量得分降序」排好，这里不再重排，
+                // 保证 #1 就是顶部的「建议持仓」，池外标的沉到最后并标「仅参考」。
+                (rotationView?.data.etfs || []).map((etf, index) => (
                   <RotationCard key={etf.code} etf={etf} rank={index + 1} />
                 ))
               )}
@@ -1240,24 +1253,6 @@ export default function ETFRotationPage() {
         </div>
       </main>
 
-      {/* 配置弹窗 */}
-      <Dialog open={showConfig} onOpenChange={setShowConfig}>
-        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Settings className="w-5 h-5" />
-              ETF配置管理
-            </DialogTitle>
-          </DialogHeader>
-          <ConfigDialogContent
-            configs={configs}
-            onRefresh={() => {
-              loadConfigs();
-              fetchData();
-            }}
-          />
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

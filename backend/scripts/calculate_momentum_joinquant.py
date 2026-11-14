@@ -212,11 +212,17 @@ def get_historical_prices(market, code, days=30):
 
 def load_config():
     """加载ETF配置和基金数据"""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    etfs = {}
-    config_path = os.path.join(script_dir, '..', 'etf_config.json')
+    # 统一从持久卷（DATA_DIR）读配置：以后直接改卷里的 etf_config.json 就生效。
+    # 早期版本读的是镜像内的 /app/etf_config.json，和页面管理写入的那份是两个文件，
+    # 改了一份另一份不跟随，很容易出现"改了配置没反应"。
+    config_path = CONFIG_FILE
+    if not os.path.exists(config_path):
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        config_path = os.path.join(script_dir, '..', 'etf_config.json')
     with open(config_path, 'r') as f:
         config = json.load(f)
+
+    etfs = {}
 
     # 批量预取实时行情：一次请求拿回所有标的，
     # 避免下面循环里逐只串行请求（10 只就是 10 次网络往返）
@@ -355,6 +361,24 @@ def get_daily_history(data, lookback_days=25):
         })
     return history
 
+# ============== 建议持仓候选池 ==============
+# 只有这 7 只里分数最高的一只会被选为「建议持仓」：
+#   城投债（防守）、纳指（海外）、黄金（避险）、
+#   创业板 / 科创50 / 科创100 / 科创200（A 股成长）
+# 池外的标的（红利低波、豆粕、恒生科技、场外基金等）照常算分、照常展示，
+# 但不参与推荐——不同风险属性的品种混在一个动量榜里，第一名往往不是
+# 真正想上仓的那只，只适合当参考分看。
+RECOMMENDABLE_CODES = {
+    '511220',   # 城投债ETF
+    '513100',   # 纳指ETF
+    '518880',   # 黄金ETF
+    '159915',   # 创业板ETF
+    '588000',   # 科创50ETF
+    '588220',   # 科创100
+    '588230',   # 科创200
+}
+
+
 def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97):
     """
     完全按照聚宽算法实现的动量计算
@@ -458,6 +482,8 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
         return {
             'code': etf_info['code'],
             'name': etf_info['name'],
+            # 是否属于「建议持仓」候选池。池外标的照常算分展示，但不参与推荐。
+            'recommendable': etf_info['code'] in RECOMMENDABLE_CODES,
             'score': round(score, 4),
             'estimated_score': round(estimated_score, 4),
             'r_squared': round(r_squared, 3),
@@ -510,14 +536,15 @@ def main():
         if metrics:
             results.append(metrics)
 
-    # 按得分排序
-    results.sort(key=lambda x: x['score'], reverse=True)
+    # 按得分排序：候选池内的排前面，池内池外各自按动量得分降序。
+    # 这样列表顺序与「建议持仓」一致，池外标的沉到最后，一眼能看出是参考分。
+    results.sort(key=lambda x: (not x.get('recommendable'), -x['score']))
 
-    # 找出得分最高的ETF
-    recommend = None
+    # 建议持仓只在候选池内、且状态正常的标的里取最高分。
+    # 池外标的分数再高也进不了建议——它们只作分数参考。
     valid_etfs = [r for r in results if r['score'] >= score_threshold]
-    if valid_etfs:
-        recommend = valid_etfs[0]['code']
+    pickable = [r for r in valid_etfs if r.get('recommendable') and r.get('status') == '正常']
+    recommend = pickable[0]['code'] if pickable else None
 
     # 输出结果
     # 一只都没算出来时必须说清原因。原来照样返回 code=200 + 空 etfs，
@@ -542,6 +569,7 @@ def main():
             'summary': {
                 'total': len(results),
                 'valid': len(valid_etfs),
+                'recommendable': len([r for r in results if r.get('recommendable')]),
                 'filtered': len([r for r in results if r['status'] != '正常'])
             }
         }
