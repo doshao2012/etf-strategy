@@ -27,6 +27,8 @@ export async function GET() {
     const etfs = (pythonResult.data.etfs || []).map((etf: any) => ({
       code: etf.code,
       name: etf.name,
+      // 是否在「建议持仓」候选池内。后端未返回时按池内处理，避免误标「仅参考」
+      recommendable: etf.recommendable !== false,
       score: etf.score ?? 0,
       estimatedScore: etf.estimated_score ?? 0,
       rSquared: etf.r_squared ?? 0,
@@ -64,7 +66,8 @@ export async function GET() {
       message: 'success',
       data: {
         etfs,
-        recommend: pythonResult.data.recommend || [],
+        // 后端返回的是单个代码（空仓时为 null），不是数组
+        recommend: typeof pythonResult.data.recommend === 'string' ? pythonResult.data.recommend : null,
         recommendCode: pythonResult.data.recommend_code || null,
         timestamp: new Date().toISOString(),
         dataSource: '快照数据',
