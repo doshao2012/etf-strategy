@@ -1012,7 +1012,7 @@ export default function ETFRotationPage() {
                       </span>
                       <span className="text-sm font-bold text-emerald-600">
                         {(() => {
-                          // 趋势轮动：后端已按「候选池优先 + 分数降序」排好，
+                          // 趋势轮动：后端已按「候选池优先 + 收益得分降序」排好，
                           // recommend 只会是候选池 7 只里分数最高、状态正常的那只。
                           if (!isOversoldMode && rotationView?.data.etfs) {
                             const code = rotationView.data.recommend;
@@ -1236,7 +1236,7 @@ export default function ETFRotationPage() {
                   <OversoldCard key={etf.code} etf={etf} rank={index + 1} />
                 ))
               ) : (
-                // 后端已按「候选池优先 + 动量得分降序」排好，这里不再重排，
+                // 后端已按「候选池优先 + 收益得分降序」排好，这里不再重排，
                 // 保证 #1 就是顶部的「建议持仓」，池外标的沉到最后并标「仅参考」。
                 (rotationView?.data.etfs || []).map((etf, index) => (
                   <RotationCard key={etf.code} etf={etf} rank={index + 1} />

@@ -536,11 +536,14 @@ def main():
         if metrics:
             results.append(metrics)
 
-    # 按得分排序：候选池内的排前面，池内池外各自按动量得分降序。
-    # 这样列表顺序与「建议持仓」一致，池外标的沉到最后，一眼能看出是参考分。
-    results.sort(key=lambda x: (not x.get('recommendable'), -x['score']))
+    # 排序：候选池内的排前面，池内池外各自按「收益得分」（年化收益）降序。
+    # 不用动量得分（score = 年化收益 × R²）排序——R² 会把走势不够顺滑、
+    # 但实际涨幅更高的标的压到后面，与卡片上第一眼看到的收益得分对不上。
+    # 池外标的沉到最后，一眼能看出是参考分。
+    results.sort(key=lambda x: (not x.get('recommendable'), -(x.get('ann_return') or 0)))
 
-    # 建议持仓只在候选池内、且状态正常的标的里取最高分。
+    # 建议持仓只在候选池内、且状态正常的标的里取「收益得分」最高的那只
+    #（pickable 继承上面的排序，所以正好是列表里第一只合格的）。
     # 池外标的分数再高也进不了建议——它们只作分数参考。
     valid_etfs = [r for r in results if r['score'] >= score_threshold]
     pickable = [r for r in valid_etfs if r.get('recommendable') and r.get('status') == '正常']
