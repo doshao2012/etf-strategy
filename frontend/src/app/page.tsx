@@ -95,11 +95,21 @@ interface RotationResponse {
 interface OversoldResponse {
   code: number;
   data: {
+    /** 兼容字段：全局最接近 ENE 下轨的 10 只 */
     etfs: OversoldETF[];
+    /** 宽基 / 商品 / 债券 */
+    broad: OversoldETF[];
+    /** 行业 / 概念 */
+    sector: OversoldETF[];
     recommend: string[];
     timestamp: string;
     dataSource: string;
-    summary: string;
+    summary: {
+      total: number;
+      analyzed: number;
+      broadTotal: number;
+      sectorTotal: number;
+    };
   };
   message: string;
 }
@@ -1192,8 +1202,8 @@ export default function ETFRotationPage() {
                   ? '创业板指 / 中证红利'
                   : isMeanReversionMode
                   ? `均值回归 (${meanReversionView?.data?.etfs?.length ?? 0})`
-                  : isOversoldMode 
-                  ? `ENE下轨标的 (${oversoldView?.data?.etfs?.length ?? 0})` 
+                  : isOversoldMode
+                  ? `ENE下轨标的 · 宽基 ${oversoldView?.data?.summary?.broadTotal ?? 0} / 行业 ${oversoldView?.data?.summary?.sectorTotal ?? 0}`
                   : `趋势排名 (${rotationView?.data?.etfs?.length ?? 0})`}
               </h2>
               
@@ -1232,9 +1242,33 @@ export default function ETFRotationPage() {
                   ));
                 })()
               ) : isOversoldMode ? (
-                (oversoldView?.data.etfs || []).map((etf, index) => (
-                  <OversoldCard key={etf.code} etf={etf} rank={index + 1} />
-                ))
+                (() => {
+                  const broad = oversoldView?.data.broad || [];
+                  const sector = oversoldView?.data.sector || [];
+                  const groups = [
+                    { key: 'broad', title: '宽基 / 商品 / 债', hint: '整体市场敞口', list: broad, accent: 'bg-blue-500' },
+                    { key: 'sector', title: '行业 / 概念', hint: '单一赛道，波动更大', list: sector, accent: 'bg-violet-500' },
+                  ];
+                  return groups.map((g) => (
+                    <div key={g.key} className="mb-6">
+                      <div className="flex items-center gap-2 mb-2.5">
+                        <span className={`w-1 h-4 rounded ${g.accent}`} />
+                        <span className="text-sm font-semibold text-slate-700">{g.title}</span>
+                        <span className="text-xs text-slate-400">{g.hint}</span>
+                        <span className="text-xs text-slate-400">· 前 {g.list.length} 名</span>
+                      </div>
+                      {g.list.length ? (
+                        g.list.map((etf, index) => (
+                          <OversoldCard key={`${g.key}-${etf.code}`} etf={etf} rank={index + 1} />
+                        ))
+                      ) : (
+                        <Card className="p-6 text-center border-slate-200">
+                          <p className="text-sm text-slate-400">暂无数据</p>
+                        </Card>
+                      )}
+                    </div>
+                  ));
+                })()
               ) : (
                 // 后端已按「候选池优先 + 收益得分降序」排好，这里不再重排，
                 // 保证 #1 就是顶部的「建议持仓」，池外标的沉到最后并标「仅参考」。

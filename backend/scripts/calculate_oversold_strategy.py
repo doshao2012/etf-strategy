@@ -470,6 +470,41 @@ def filter_by_volume(etf_list: List[Dict], min_volume: float = 5000) -> List[Dic
     return filtered_etfs
 
 
+# ==================== 分组：宽基 vs 行业/概念 ====================
+#
+# 宽基组 = 整体市场敞口，不押单一行业：
+#   - 宽基指数（沪深300、中证500/1000/2000、创业板、科创50/100/200、A500…）
+#   - 商品（黄金、豆粕、原油、有色、能源化工，以及债券类）
+#   - 海外宽基指数（纳指、标普500、日经、德国、恒生、恒生科技…）
+# 其余（科技、医药、消费、金融、新能源、周期、军工、传媒、红利、地产…）
+# 一律归入「行业/概念」组。
+#
+# 海外需要按代码区分：纳指/标普/恒生是宽基，而"纳指科技""港股医药""中概互联"
+# 这类是主题，靠 category 分不开，所以单独列宽基白名单。
+BROAD_CATEGORIES = {'宽基', '商品', '债券'}
+OVERSEAS_BROAD_CODES = {
+    '513100', '159941',            # 纳指
+    '513500', '159655',            # 标普500
+    '513300', '159920',            # 恒生
+    '513260', '159740',            # 恒生科技
+    '513650', '513030', '164824',  # 德国
+    '513520',                      # 日经
+    '513400',                      # 道琼斯
+    '159687',                      # 亚太精选
+    '510900',                      # 恒生中国
+}
+
+
+def etf_group(etf: Dict) -> str:
+    """返回 'broad'（宽基/商品/债券）或 'sector'（行业/概念）。"""
+    cat = etf.get('category') or ''
+    if cat in BROAD_CATEGORIES:
+        return 'broad'
+    if cat == '海外' and str(etf.get('code')) in OVERSEAS_BROAD_CODES:
+        return 'broad'
+    return 'sector'
+
+
 def merge_duplicate_etfs(etf_list: List[Dict]) -> List[Dict]:
     """
     合并同类ETF，只保留成交额最大的一只
@@ -635,7 +670,8 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
                 'lower_band': round(lower_band, 3),
                 'dist_to_lower': round(dist_to_lower, 2),
                 'avg_money': round(etf.get('volume', 0), 0),
-                'category': etf.get('category', '其他')
+                'category': etf.get('category', '其他'),
+                'group': etf_group(etf)
             }
         except Exception:
             return None
@@ -730,14 +766,23 @@ if __name__ == '__main__':
     oversold_etfs = calculate_oversold_analysis(merged_etfs)
     
     # 输出结果（始终输出JSON）
+    broad_etfs = [e for e in oversold_etfs if e['group'] == 'broad']
+    sector_etfs = [e for e in oversold_etfs if e['group'] == 'sector']
+
     result = {
         'code': 200,
         'msg': 'success',
         'data': {
             'summary': {
                 'total': len(merged_etfs),
-                'analyzed': len(oversold_etfs)
+                'analyzed': len(oversold_etfs),
+                'broadTotal': len(broad_etfs),
+                'sectorTotal': len(sector_etfs)
             },
+            # 两个组各自按距离 ENE 下轨从近到远排序，各取前 10
+            'broad': broad_etfs[:10],
+            'sector': sector_etfs[:10],
+            # 兼容字段：全局最超跌的 10 只（老前端仍可读）
             'etfs': oversold_etfs[:10]
         }
     }
