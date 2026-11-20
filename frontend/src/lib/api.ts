@@ -53,11 +53,21 @@ export interface OversoldETF {
 export interface OversoldResponse {
   code: number;
   data: {
+    /** 兼容字段：全局最接近 ENE 下轨的 10 只 */
     etfs: OversoldETF[];
+    /** 宽基 / 商品 / 债券 */
+    broad: OversoldETF[];
+    /** 行业 / 概念 */
+    sector: OversoldETF[];
     recommend: string[];
     timestamp: string;
     dataSource: string;
-    summary: string;
+    summary: {
+      total: number;
+      analyzed: number;
+      broadTotal: number;
+      sectorTotal: number;
+    };
   };
   message: string;
 }

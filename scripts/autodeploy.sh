@@ -163,6 +163,24 @@ if [ "$LOCAL" = "$TARGET" ] && [ "$MODE" != "force" ]; then
   exit 1
 fi
 
+# ------------------------------------------------- 2b. 本地领先远端：跳过
+# 服务器上有尚未推送的提交（典型：推送凭据失效后直接在服务器改的代码）。
+# 这种状态下 pull 必然是非快进，但它不是故障，不该每轮都记一条失败。
+if [ "$LOCAL" != "$TARGET" ] && git merge-base --is-ancestor "$TARGET" "$LOCAL" 2>/dev/null; then
+  if [ -n "$DC" ] && ! healthy; then
+    log "本地领先远端，但健康检查失败，尝试拉起容器"
+    $DC up -d >>"$LOG_FILE" 2>&1
+    if ! wait_healthy; then
+      log "拉起后仍不健康，需要人工介入（docker compose logs backend）"
+      exit 1
+    fi
+  fi
+  printf '%s %s 本地领先远端·健康\n' "$(date '+%F %T')" "${LOCAL:0:7}" \
+    > "$APP_DIR/logs/last-check" 2>/dev/null || true
+  log "本地领先远端 ${TARGET:0:7}（本地 ${LOCAL:0:7} 有未推送提交），跳过更新"
+  exit 0
+fi
+
 if [ "$MODE" = "check" ]; then
   log "有新版本：${LOCAL:0:7} → ${TARGET:0:7}（--check 模式，不执行）"
   git log --oneline "$LOCAL..$TARGET" | head -20 | tee -a "$LOG_FILE" >&2
