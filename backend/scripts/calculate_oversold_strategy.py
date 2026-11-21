@@ -688,7 +688,7 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
     return results
 
 
-# ==================== 历史超跌回溯（近 2 年） ====================
+# ==================== 历史超跌回溯（近 3 年） ====================
 #
 # 规则：T 日盘中最低价触及 ENE 下轨即视为「碰轨买入」（成交价取 min(开盘价, 下轨)，
 # 低开在下轨下方时按开盘价成交）；随后看 T+1 ~ T+3 的盘中最高价，取其中最高的一档
@@ -697,12 +697,11 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
 # 数据用日线的 open/high/low/close（前复权），是分时行情的近似：日线 high 即当日
 # 盘中最高，low 即盘中最低，与「盘中」的定义一致，只是无法捕捉同一日内更细的顺序。
 #
-# 连续碰轨做去重：若前 3 个交易日内已计过一次，就不再重复计，避免同一波下跌被
-# 反复采样，把「次数」拉高、把均值拉平。
-BT_YEARS = 2            # 回溯年数
-BT_FETCH_DAYS = 560     # 拉取日线根数（2 年约 490 根，留出 MA10 预热余量）
+# 连续碰轨不做合并：只要落在不同交易日，每天都单独算一笔（同一波下跌连续下跌时
+# 会出现多笔重叠的买入，各自按当日下轨价成交、各自看后 3 日）。
+BT_YEARS = 3            # 回溯年数
+BT_FETCH_DAYS = 800     # 拉取日线根数（3 年约 730 根，留出 MA10 预热余量，接口上限）
 BT_HORIZON = 3          # 买入后观察 3 个交易日
-BT_DEDUP_GAP = 3        # 同一波下跌：3 个交易日内只计首次
 BT_MAX_TRADES = 6       # 明细最多返回最近 6 次
 BT_CACHE_TTL = 1800     # 回溯结果缓存 30 分钟（盘中高低点会变，不宜整天复用）
 BT_CACHE_FILE = os.path.join(DATA_DIR, 'oversold_backtest_cache.json')
@@ -747,7 +746,6 @@ def _backtest_one(etf: Dict) -> Optional[Dict]:
         lower = df['close'].rolling(MA_PERIOD).mean() * (1 - ENE_LOWER_PCT)
         n = len(df)
         recs = []
-        last_hit = -999
         for i in range(MA_PERIOD - 1, n - BT_HORIZON):
             lb = lower.iloc[i]
             if pd.isna(lb) or lb <= 0:
@@ -756,8 +754,7 @@ def _backtest_one(etf: Dict) -> Optional[Dict]:
             # low<=0 属于停牌/数据缺失，不能当成"跌破下轨"
             if low_i <= 0 or low_i > float(lb):
                 continue
-            if i - last_hit <= BT_DEDUP_GAP:
-                continue
+            # 连续触轨按不同交易日各自独立计算，不做合并去重
             buy = min(float(df['open'].iloc[i]), float(lb))
             if buy <= 0:
                 continue
@@ -765,7 +762,6 @@ def _backtest_one(etf: Dict) -> Optional[Dict]:
             if len(seg) < BT_HORIZON:
                 continue
             k = int(np.argmax(seg))
-            last_hit = i
             recs.append({
                 'date': str(df['day'].iloc[i]),
                 'buy': round(buy, 4),
@@ -774,7 +770,7 @@ def _backtest_one(etf: Dict) -> Optional[Dict]:
                 'max_date': str(df['day'].iloc[i + 1 + k]),
             })
 
-        # 只保留最近 2 年（以最后一根 K 线为基准）
+        # 只保留最近 3 年（以最后一根 K 线为基准）
         cutoff = pd.to_datetime(df['day'].iloc[-1]) - pd.DateOffset(years=BT_YEARS)
         recs = [r for r in recs if pd.to_datetime(r['date']) >= cutoff]
         if not recs:
@@ -824,7 +820,7 @@ def _save_bt_cache(items: Dict):
 
 
 def attach_backtest(etfs: List[Dict]) -> List[Dict]:
-    """给前端要展示的标的补上近 2 年超跌回溯（带 30 分钟缓存）。"""
+    """给前端要展示的标的补上近 3 年超跌回溯（带 30 分钟缓存）。"""
     if not etfs:
         return etfs
     items = _load_bt_cache()
@@ -833,10 +829,12 @@ def attach_backtest(etfs: List[Dict]) -> List[Dict]:
     for etf in etfs:
         key = f"{etf['market']}{etf['code']}"
         hit = items.get(key)
-        if hit and now - float(hit.get('ts') or 0) < BT_CACHE_TTL:
-            etf['bt'] = hit.get('bt')
-        elif hit and hit.get('bt'):
-            etf['bt'] = hit.get('bt')   # 过期但抓取失败时退回旧结果
+        # 口径（回溯年数）变了就作废旧缓存，别拿 2 年的结果冒充 3 年
+        valid = bool(hit) and (hit.get('bt') or {}).get('years') == BT_YEARS
+        if valid and now - float(hit.get('ts') or 0) < BT_CACHE_TTL:
+            etf['bt'] = hit['bt']
+        elif valid and hit.get('bt'):
+            etf['bt'] = hit['bt']   # 过期但抓取失败时退回旧结果
             todo.append(etf)
         else:
             todo.append(etf)
@@ -943,7 +941,7 @@ if __name__ == '__main__':
     broad_top = broad_etfs[:10]
     sector_top = sector_etfs[:10]
 
-    # 只给前端展示的这 20 只补「近 2 年超跌回溯」，不为全量 100+ 只拉 2 年日线
+    # 只给前端展示的这 20 只补「近 3 年超跌回溯」，不为全量 100+ 只拉 3 年日线
     attach_backtest(broad_top + sector_top)
 
     result = {

@@ -55,7 +55,7 @@ export interface OversoldTrade {
 
 export interface OversoldBacktest {
   years: number;
-  /** 近 2 年触发次数（同一波下跌只计首次） */
+  /** 近 3 年触发次数（连续触轨按不同交易日分别计入） */
   count: number;
   winRate: number | null;
   avgMax: number | null;

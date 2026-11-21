@@ -428,7 +428,7 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
           </div>
         </div>
 
-        {/* 近 2 年超跌回溯：T 日碰下轨买入 → T+1~T+3 盘中最大收益 */}
+        {/* 近 3 年超跌回溯：T 日碰下轨买入 → T+1~T+3 盘中最大收益 */}
         {bt && (
           <div className="mt-3 pt-3 border-t border-slate-100">
             <button
@@ -502,7 +502,7 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
                 </div>
                 <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
                   T 日盘中触及下轨即买入（成交价取下轨与开盘价中较低者），统计 T+1~T+3 盘中最高价的最大浮盈；
-                  同一波下跌 3 个交易日内只计首次，用日线高低点近似盘中。
+                  连续触轨按不同交易日分别计入，用日线高低点近似盘中。
                   {bt.count > bt.recent.length && ` 共 ${bt.count} 次，此处列最近 ${bt.recent.length} 次。`}
                 </p>
               </div>
