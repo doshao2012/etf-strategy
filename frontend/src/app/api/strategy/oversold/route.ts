@@ -20,7 +20,9 @@ function mapEtf(etf: any) {
     bt: bt
       ? {
           years: bt.years ?? 3,
+          // count 只算已走满 T+3 的，pendingCount 是还没到期的观察中记录
           count: bt.count ?? 0,
+          pendingCount: bt.pending_count ?? 0,
           winRate: bt.win_rate ?? null,
           avgMax: bt.avg_max ?? null,
           medianMax: bt.median_max ?? null,
@@ -31,13 +33,15 @@ function mapEtf(etf: any) {
             count: d.count,
             avg: d.avg,
           })),
-          // 全部触发明细，按日期倒序，前端一个不落地列出
+          // 全部触发明细，按日期倒序；pending = 还没走满 T+3，收益只是当前值
           trades: (bt.trades || []).map((t: any) => ({
             date: t.date,
             buy: t.buy,
-            maxRet: t.max_ret,
-            day: t.day,
-            maxDate: t.max_date,
+            maxRet: t.max_ret ?? null,
+            day: t.day ?? null,
+            maxDate: t.max_date ?? null,
+            pending: !!t.pending,
+            elapsed: t.elapsed ?? null,
           })),
         }
       : null,

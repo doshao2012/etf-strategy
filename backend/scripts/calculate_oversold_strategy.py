@@ -702,7 +702,7 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
 BT_YEARS = 3            # 回溯年数
 BT_FETCH_DAYS = 800     # 拉取日线根数（3 年约 730 根，留出 MA10 预热余量，接口上限）
 BT_HORIZON = 3          # 买入后观察 3 个交易日
-BT_SCHEMA = 2           # 结果结构版本，字段一改就加一，旧缓存自动作废
+BT_SCHEMA = 3           # 结果结构版本，字段一改就加一，旧缓存自动作废
 BT_CACHE_TTL = 1800     # 回溯结果缓存 30 分钟（盘中高低点会变，不宜整天复用）
 BT_CACHE_FILE = os.path.join(DATA_DIR, 'oversold_backtest_cache.json')
 
@@ -746,7 +746,8 @@ def _backtest_one(etf: Dict) -> Optional[Dict]:
         lower = df['close'].rolling(MA_PERIOD).mean() * (1 - ENE_LOWER_PCT)
         n = len(df)
         recs = []
-        for i in range(MA_PERIOD - 1, n - BT_HORIZON):
+        # 一直走到最后一根 K 线：最近几天才触发的还没走满 T+3，也要能显示出来
+        for i in range(MA_PERIOD - 1, n):
             lb = lower.iloc[i]
             if pd.isna(lb) or lb <= 0:
                 continue
@@ -758,9 +759,18 @@ def _backtest_one(etf: Dict) -> Optional[Dict]:
             buy = min(float(df['open'].iloc[i]), float(lb))
             if buy <= 0:
                 continue
-            seg = df['high'].iloc[i + 1:i + 1 + BT_HORIZON].values.astype(float)
-            if len(seg) < BT_HORIZON:
+            # 触发后已经走完的交易日数：0 = 当天刚触发，还没有 T+1
+            avail = n - 1 - i
+            if avail <= 0:
+                recs.append({
+                    'date': str(df['day'].iloc[i]),
+                    'buy': round(buy, 4),
+                    'max_ret': None, 'day': None, 'max_date': None,
+                    'pending': True, 'elapsed': 0,
+                })
                 continue
+            span = min(BT_HORIZON, avail)
+            seg = df['high'].iloc[i + 1:i + 1 + span].values.astype(float)
             k = int(np.argmax(seg))
             recs.append({
                 'date': str(df['day'].iloc[i]),
@@ -768,29 +778,41 @@ def _backtest_one(etf: Dict) -> Optional[Dict]:
                 'max_ret': round((float(seg[k]) / buy - 1) * 100, 2),
                 'day': k + 1,
                 'max_date': str(df['day'].iloc[i + 1 + k]),
+                # 未走满 T+3：这个收益只是"到目前为止"的最大浮盈，后面还会变
+                'pending': avail < BT_HORIZON,
+                'elapsed': avail,
             })
 
         # 只保留最近 3 年（以最后一根 K 线为基准）
         cutoff = pd.to_datetime(df['day'].iloc[-1]) - pd.DateOffset(years=BT_YEARS)
         recs = [r for r in recs if pd.to_datetime(r['date']) >= cutoff]
-        if not recs:
-            return {'v': BT_SCHEMA, 'years': BT_YEARS, 'count': 0,
-                    'trades': [], 'by_day': []}
 
-        rets = [r['max_ret'] for r in recs]
+        # 统计口径只用已走满 T+3 的记录；观察中的单独计数，不污染胜率和均值
+        done = [r for r in recs if not r['pending']]
+        pending_count = len(recs) - len(done)
+        if not done:
+            return {
+                'v': BT_SCHEMA, 'years': BT_YEARS, 'count': 0,
+                'pending_count': pending_count,
+                'trades': sorted(recs, key=lambda r: r['date'], reverse=True),
+                'by_day': [],
+            }
+
+        rets = [r['max_ret'] for r in done]
         by_day = []
         for d in (1, 2, 3):
-            hit = [r['max_ret'] for r in recs if r['day'] == d]
+            hit = [r['max_ret'] for r in done if r['day'] == d]
             if hit:
                 by_day.append({'day': d, 'count': len(hit),
                                'avg': round(float(np.mean(hit)), 2)})
 
-        # 全部明细按日期倒序返回，前端一个不落地列出
+        # 全部明细按日期倒序返回（含观察中的），前端一个不落地列出
         trades = sorted(recs, key=lambda r: r['date'], reverse=True)
         return {
             'v': BT_SCHEMA,
             'years': BT_YEARS,
-            'count': len(recs),
+            'count': len(done),
+            'pending_count': pending_count,
             'win_rate': round(sum(1 for x in rets if x > 0) / len(rets) * 100, 1),
             'avg_max': round(float(np.mean(rets)), 2),
             'median_max': round(float(np.median(rets)), 2),

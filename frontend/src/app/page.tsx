@@ -66,14 +66,17 @@ interface RotationETF {
 interface OversoldTrade {
   date: string;
   buy: number;
-  maxRet: number;
-  day: number;
-  maxDate: string;
+  maxRet: number | null;
+  day: number | null;
+  maxDate: string | null;
+  pending?: boolean;
+  elapsed?: number | null;
 }
 
 interface OversoldBacktest {
   years: number;
   count: number;
+  pendingCount?: number;
   winRate: number | null;
   avgMax: number | null;
   medianMax: number | null;
@@ -370,7 +373,10 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
   const isNearLower = etf.distanceToLower < 5;
   const [btOpen, setBtOpen] = useState(false);
   const bt = etf.bt;
-  const hasBt = !!bt && bt.count > 0;
+  const doneCount = bt?.count ?? 0;
+  // 还没走满 T+3 的记录也要显示出来，但不算进胜率/均值
+  const pendCount = bt?.pendingCount ?? 0;
+  const hasBt = !!bt && (doneCount > 0 || pendCount > 0);
 
   return (
     <Card className={`mb-3 bg-white border ${isNearLower ? 'border-amber-300 shadow-md' : 'border-slate-200 shadow-sm'} hover:shadow-md transition-shadow`}>
@@ -439,9 +445,9 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
             >
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                 <span className="font-medium text-slate-600">近 {bt.years} 年超跌回溯</span>
-                {hasBt ? (
+                {doneCount > 0 && (
                   <>
-                    <span className="text-slate-400">触发 {bt.count} 次</span>
+                    <span className="text-slate-400">触发 {doneCount} 次</span>
                     <span className="text-slate-400">
                       胜率 <span className="text-slate-700 font-medium">{bt.winRate}%</span>
                     </span>
@@ -452,7 +458,11 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
                       </span>
                     </span>
                   </>
-                ) : (
+                )}
+                {pendCount > 0 && (
+                  <span className="text-red-500 font-medium">{pendCount} 笔未满 T+3</span>
+                )}
+                {!hasBt && (
                   <span className="text-slate-400">近 {bt.years} 年未触发过下轨</span>
                 )}
               </div>
@@ -488,14 +498,31 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {bt.trades.map((t) => (
-                        <tr key={t.date} className="border-t border-slate-50">
-                          <td className="py-1.5 px-2 text-slate-600">{t.date}</td>
-                          <td className="py-1.5 px-2 text-right text-slate-600">{t.buy.toFixed(3)}</td>
-                          <td className={`py-1.5 px-2 text-right font-medium ${t.maxRet >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                            {t.maxRet >= 0 ? '+' : ''}{t.maxRet.toFixed(2)}%
+                      {bt.trades.map((t, ti) => (
+                        <tr key={`${t.date}-${ti}`} className="border-t border-slate-50">
+                          <td className="py-1.5 px-2">
+                            <span className={t.pending ? 'text-red-500 font-semibold' : 'text-slate-600'}>
+                              {t.date}
+                            </span>
+                            {t.pending && (
+                              <span className="ml-1.5 text-[10px] text-red-400">
+                                {t.elapsed ? `已过 ${t.elapsed} 日` : '待 T+1'}
+                              </span>
+                            )}
                           </td>
-                          <td className="py-1.5 px-2 text-right text-slate-500">+{t.day}日</td>
+                          <td className="py-1.5 px-2 text-right text-slate-600">{t.buy.toFixed(3)}</td>
+                          <td className={`py-1.5 px-2 text-right font-medium ${
+                            t.maxRet == null
+                              ? 'text-slate-400'
+                              : t.maxRet >= 0
+                                ? 'text-red-500'
+                                : 'text-emerald-500'
+                          } ${t.pending ? 'opacity-60' : ''}`}>
+                            {t.maxRet == null ? '—' : `${t.maxRet >= 0 ? '+' : ''}${t.maxRet.toFixed(2)}%`}
+                          </td>
+                          <td className="py-1.5 px-2 text-right text-slate-500">
+                            {t.day == null ? '—' : `+${t.day}日`}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -503,7 +530,8 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
                 </div>
                 <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
                   T 日盘中触及下轨即买入（成交价取下轨与开盘价中较低者），统计 T+1~T+3 盘中最高价的最大浮盈；
-                  连续触轨按不同交易日分别计入，用日线高低点近似盘中。共 {bt.count} 次，全部列出。
+                  连续触轨按不同交易日分别计入，用日线高低点近似盘中。
+                  日期标红的是还没走满 T+3 的，收益为截至最新的盘中最大浮盈，尚未定型，也不计入上面的胜率和均值。
                 </p>
               </div>
             )}

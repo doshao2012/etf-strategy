@@ -45,18 +45,24 @@ export interface OversoldTrade {
   date: string;
   /** 买入价：min(当日开盘价, 下轨) */
   buy: number;
-  /** T+1~T+3 盘中最大收益（%） */
-  maxRet: number;
-  /** 最大收益出现在 +几日 */
-  day: number;
+  /** T+1~T+3 盘中最大收益（%）；当天刚触发还没 T+1 时为 null */
+  maxRet: number | null;
+  /** 最大收益出现在 +几日；无后续数据时为 null */
+  day: number | null;
   /** 取得最大收益的日期 */
-  maxDate: string;
+  maxDate: string | null;
+  /** 还没走满 T+3，收益只是截至当前的盘中最大浮盈 */
+  pending?: boolean;
+  /** 触发后已走完的交易日数，0 = 当天刚触发 */
+  elapsed?: number | null;
 }
 
 export interface OversoldBacktest {
   years: number;
-  /** 近 3 年触发次数（连续触轨按不同交易日分别计入） */
+  /** 已走满 T+3 的触发次数（连续触轨按不同交易日分别计入） */
   count: number;
+  /** 还没走满 T+3 的观察中记录数 */
+  pendingCount?: number;
   winRate: number | null;
   avgMax: number | null;
   medianMax: number | null;
