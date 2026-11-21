@@ -702,6 +702,7 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
 BT_YEARS = 3            # 回溯年数
 BT_FETCH_DAYS = 800     # 拉取日线根数（3 年约 730 根，留出 MA10 预热余量，接口上限）
 BT_HORIZON = 3          # 买入后观察 3 个交易日
+BT_SCHEMA = 2           # 结果结构版本，字段一改就加一，旧缓存自动作废
 BT_CACHE_TTL = 1800     # 回溯结果缓存 30 分钟（盘中高低点会变，不宜整天复用）
 BT_CACHE_FILE = os.path.join(DATA_DIR, 'oversold_backtest_cache.json')
 
@@ -773,7 +774,8 @@ def _backtest_one(etf: Dict) -> Optional[Dict]:
         cutoff = pd.to_datetime(df['day'].iloc[-1]) - pd.DateOffset(years=BT_YEARS)
         recs = [r for r in recs if pd.to_datetime(r['date']) >= cutoff]
         if not recs:
-            return {'years': BT_YEARS, 'count': 0, 'trades': [], 'by_day': []}
+            return {'v': BT_SCHEMA, 'years': BT_YEARS, 'count': 0,
+                    'trades': [], 'by_day': []}
 
         rets = [r['max_ret'] for r in recs]
         by_day = []
@@ -786,6 +788,7 @@ def _backtest_one(etf: Dict) -> Optional[Dict]:
         # 全部明细按日期倒序返回，前端一个不落地列出
         trades = sorted(recs, key=lambda r: r['date'], reverse=True)
         return {
+            'v': BT_SCHEMA,
             'years': BT_YEARS,
             'count': len(recs),
             'win_rate': round(sum(1 for x in rets if x > 0) / len(rets) * 100, 1),
@@ -829,11 +832,14 @@ def attach_backtest(etfs: List[Dict]) -> List[Dict]:
     for etf in etfs:
         key = f"{etf['market']}{etf['code']}"
         hit = items.get(key)
-        # 口径（回溯年数）变了就作废旧缓存，别拿 2 年的结果冒充 3 年
-        valid = bool(hit) and (hit.get('bt') or {}).get('years') == BT_YEARS
+        # 口径（回溯年数）或结果结构变了就作废旧缓存：
+        # 别拿 2 年的结果冒充 3 年，也别拿只有 recent 没有 trades 的旧结构给新前端
+        cached = (hit or {}).get('bt') or {}
+        valid = bool(cached) and cached.get('years') == BT_YEARS \
+            and cached.get('v') == BT_SCHEMA
         if valid and now - float(hit.get('ts') or 0) < BT_CACHE_TTL:
             etf['bt'] = hit['bt']
-        elif valid and hit.get('bt'):
+        elif valid:
             etf['bt'] = hit['bt']   # 过期但抓取失败时退回旧结果
             todo.append(etf)
         else:
