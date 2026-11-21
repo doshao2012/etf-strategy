@@ -752,7 +752,9 @@ def _backtest_one(etf: Dict) -> Optional[Dict]:
             lb = lower.iloc[i]
             if pd.isna(lb) or lb <= 0:
                 continue
-            if float(df['low'].iloc[i]) > float(lb):
+            low_i = float(df['low'].iloc[i])
+            # low<=0 属于停牌/数据缺失，不能当成"跌破下轨"
+            if low_i <= 0 or low_i > float(lb):
                 continue
             if i - last_hit <= BT_DEDUP_GAP:
                 continue
@@ -851,6 +853,9 @@ def attach_backtest(etfs: List[Dict]) -> List[Dict]:
                 if bt:
                     etf['bt'] = bt
                     items[f"{etf['market']}{etf['code']}"] = {'ts': now, 'bt': bt}
+        # 每天的前 10 名单会变，顺手清掉 7 天没再出现的条目，避免缓存无限膨胀
+        items = {k: v for k, v in items.items()
+                 if now - float(v.get('ts') or 0) < 7 * 86400}
         _save_bt_cache(items)
     return etfs
 
