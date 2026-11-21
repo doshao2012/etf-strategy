@@ -517,7 +517,7 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
                               : t.maxRet >= 0
                                 ? 'text-red-500'
                                 : 'text-emerald-500'
-                          } ${t.pending ? 'opacity-60' : ''}`}>
+                          } ${t.pending ? 'opacity-80' : ''}`}>
                             {t.maxRet == null ? '—' : `${t.maxRet >= 0 ? '+' : ''}${t.maxRet.toFixed(2)}%`}
                           </td>
                           <td className="py-1.5 px-2 text-right text-slate-500">
