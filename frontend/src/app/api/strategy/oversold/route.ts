@@ -5,6 +5,7 @@ const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:
 
 // 后端字段是 snake_case，这里统一转成前端的 camelCase
 function mapEtf(etf: any) {
+  const bt = etf.bt;
   return {
     code: etf.code,
     name: etf.name,
@@ -14,6 +15,30 @@ function mapEtf(etf: any) {
     lowerBand: etf.lower_band,
     distanceToLower: etf.dist_to_lower,
     avgMoney: etf.avg_money || 0,
+    // 近 2 年超跌回溯：T 日碰下轨买入 → T+1~T+3 盘中最大收益
+    bt: bt
+      ? {
+          years: bt.years ?? 2,
+          count: bt.count ?? 0,
+          winRate: bt.win_rate ?? null,
+          avgMax: bt.avg_max ?? null,
+          medianMax: bt.median_max ?? null,
+          bestMax: bt.best_max ?? null,
+          worstMax: bt.worst_max ?? null,
+          byDay: (bt.by_day || []).map((d: any) => ({
+            day: d.day,
+            count: d.count,
+            avg: d.avg,
+          })),
+          recent: (bt.recent || []).map((t: any) => ({
+            date: t.date,
+            buy: t.buy,
+            maxRet: t.max_ret,
+            day: t.day,
+            maxDate: t.max_date,
+          })),
+        }
+      : null,
   };
 }
 

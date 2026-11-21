@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { RefreshCw, Plus, Pencil, Trash2, Shield } from 'lucide-react';
+import { RefreshCw, Plus, Pencil, Trash2, Shield, ChevronDown } from 'lucide-react';
 
 type StrategyType = 'rotation' | 'oversold' | 'meanReversion' | 'ma200Trend' | 'cybDividend' | 'nationalTeam';
 
@@ -63,6 +63,26 @@ interface RotationETF {
 }
 
 // 超跌策略ETF数据
+interface OversoldTrade {
+  date: string;
+  buy: number;
+  maxRet: number;
+  day: number;
+  maxDate: string;
+}
+
+interface OversoldBacktest {
+  years: number;
+  count: number;
+  winRate: number | null;
+  avgMax: number | null;
+  medianMax: number | null;
+  bestMax: number | null;
+  worstMax: number | null;
+  byDay: { day: number; count: number; avg: number }[];
+  recent: OversoldTrade[];
+}
+
 interface OversoldETF {
   code: string;
   name: string;
@@ -72,6 +92,7 @@ interface OversoldETF {
   lowerBand: number;
   distanceToLower: number;
   avgMoney: number;
+  bt?: OversoldBacktest | null;
 }
 
 interface RotationResponse {
@@ -346,6 +367,9 @@ function RotationCard({ etf, rank }: { etf: RotationETF; rank: number }) {
 // 超跌策略卡片
 function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
   const isNearLower = etf.distanceToLower < 5;
+  const [btOpen, setBtOpen] = useState(false);
+  const bt = etf.bt;
+  const hasBt = !!bt && bt.count > 0;
 
   return (
     <Card className={`mb-3 bg-white border ${isNearLower ? 'border-amber-300 shadow-md' : 'border-slate-200 shadow-sm'} hover:shadow-md transition-shadow`}>
@@ -403,6 +427,88 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
             </p>
           </div>
         </div>
+
+        {/* 近 2 年超跌回溯：T 日碰下轨买入 → T+1~T+3 盘中最大收益 */}
+        {bt && (
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setBtOpen((v) => !v)}
+              className="w-full flex items-center justify-between gap-2 text-left group"
+            >
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                <span className="font-medium text-slate-600">近 {bt.years} 年超跌回溯</span>
+                {hasBt ? (
+                  <>
+                    <span className="text-slate-400">触发 {bt.count} 次</span>
+                    <span className="text-slate-400">
+                      胜率 <span className="text-slate-700 font-medium">{bt.winRate}%</span>
+                    </span>
+                    <span className="text-slate-400">
+                      平均最大{' '}
+                      <span className={`font-semibold ${(bt.avgMax ?? 0) >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                        {(bt.avgMax ?? 0) >= 0 ? '+' : ''}{bt.avgMax}%
+                      </span>
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-slate-400">近 {bt.years} 年未触发过下轨</span>
+                )}
+              </div>
+              {hasBt && (
+                <ChevronDown
+                  className={`w-4 h-4 shrink-0 text-slate-400 transition-transform ${btOpen ? 'rotate-180' : ''}`}
+                />
+              )}
+            </button>
+
+            {hasBt && btOpen && (
+              <div className="mt-2.5">
+                {/* 最大收益落在 +几日的分布 */}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-2 text-[11px] text-slate-500">
+                  {bt.byDay.map((d) => (
+                    <span key={d.day}>
+                      +{d.day}日 <span className="text-slate-700 font-medium">{d.count}</span> 次 · 均值{' '}
+                      <span className={`font-medium ${d.avg >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                        {d.avg >= 0 ? '+' : ''}{d.avg}%
+                      </span>
+                    </span>
+                  ))}
+                </div>
+
+                <div className="overflow-hidden rounded-lg border border-slate-100">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="py-1.5 px-2 text-left font-medium">触发日</th>
+                        <th className="py-1.5 px-2 text-right font-medium">买入价</th>
+                        <th className="py-1.5 px-2 text-right font-medium">T+1~T+3 最大</th>
+                        <th className="py-1.5 px-2 text-right font-medium">出现在</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bt.recent.map((t) => (
+                        <tr key={t.date} className="border-t border-slate-50">
+                          <td className="py-1.5 px-2 text-slate-600">{t.date}</td>
+                          <td className="py-1.5 px-2 text-right text-slate-600">{t.buy.toFixed(3)}</td>
+                          <td className={`py-1.5 px-2 text-right font-medium ${t.maxRet >= 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                            {t.maxRet >= 0 ? '+' : ''}{t.maxRet.toFixed(2)}%
+                          </td>
+                          <td className="py-1.5 px-2 text-right text-slate-500">+{t.day}日</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+                  T 日盘中触及下轨即买入（成交价取下轨与开盘价中较低者），统计 T+1~T+3 盘中最高价的最大浮盈；
+                  同一波下跌 3 个交易日内只计首次，用日线高低点近似盘中。
+                  {bt.count > bt.recent.length && ` 共 ${bt.count} 次，此处列最近 ${bt.recent.length} 次。`}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

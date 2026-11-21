@@ -39,6 +39,35 @@ export interface StrategyResponse {
 }
 
 // 超跌策略ETF数据
+/** 一次历史超跌触发的回溯记录：T 日碰轨买入 → T+1~T+3 内盘中最大收益 */
+export interface OversoldTrade {
+  /** 触发日（碰下轨当天） */
+  date: string;
+  /** 买入价：min(当日开盘价, 下轨) */
+  buy: number;
+  /** T+1~T+3 盘中最大收益（%） */
+  maxRet: number;
+  /** 最大收益出现在 +几日 */
+  day: number;
+  /** 取得最大收益的日期 */
+  maxDate: string;
+}
+
+export interface OversoldBacktest {
+  years: number;
+  /** 近 2 年触发次数（同一波下跌只计首次） */
+  count: number;
+  winRate: number | null;
+  avgMax: number | null;
+  medianMax: number | null;
+  bestMax: number | null;
+  worstMax: number | null;
+  /** 最大收益落在 +1/+2/+3 的分布 */
+  byDay: { day: number; count: number; avg: number }[];
+  /** 最近若干次明细（按日期倒序） */
+  recent: OversoldTrade[];
+}
+
 export interface OversoldETF {
   code: string;
   name: string;
@@ -48,6 +77,7 @@ export interface OversoldETF {
   lowerBand: number;
   distanceToLower: number;
   avgMoney: number;
+  bt?: OversoldBacktest | null;
 }
 
 export interface OversoldResponse {

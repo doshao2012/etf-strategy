@@ -13,6 +13,7 @@ ENE下轨 = MA10 * (1 - 0.09)
 import sys
 import os
 import json
+import time
 import requests
 import pandas as pd
 import numpy as np
@@ -687,10 +688,176 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
     return results
 
 
+# ==================== 历史超跌回溯（近 2 年） ====================
+#
+# 规则：T 日盘中最低价触及 ENE 下轨即视为「碰轨买入」（成交价取 min(开盘价, 下轨)，
+# 低开在下轨下方时按开盘价成交）；随后看 T+1 ~ T+3 的盘中最高价，取其中最高的一档
+# 作为本次的最大浮盈，并记录它出现在 +1 / +2 / +3 哪一日。
+#
+# 数据用日线的 open/high/low/close（前复权），是分时行情的近似：日线 high 即当日
+# 盘中最高，low 即盘中最低，与「盘中」的定义一致，只是无法捕捉同一日内更细的顺序。
+#
+# 连续碰轨做去重：若前 3 个交易日内已计过一次，就不再重复计，避免同一波下跌被
+# 反复采样，把「次数」拉高、把均值拉平。
+BT_YEARS = 2            # 回溯年数
+BT_FETCH_DAYS = 560     # 拉取日线根数（2 年约 490 根，留出 MA10 预热余量）
+BT_HORIZON = 3          # 买入后观察 3 个交易日
+BT_DEDUP_GAP = 3        # 同一波下跌：3 个交易日内只计首次
+BT_MAX_TRADES = 6       # 明细最多返回最近 6 次
+BT_CACHE_TTL = 1800     # 回溯结果缓存 30 分钟（盘中高低点会变，不宜整天复用）
+BT_CACHE_FILE = os.path.join(DATA_DIR, 'oversold_backtest_cache.json')
+
+
+def _fetch_daily(symbol: str, count: int) -> List[Dict]:
+    """拉取前复权日线，返回 [{day, open, high, low, close}, ...]"""
+    try:
+        url = (f"http://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get"
+               f"?param={symbol},day,,,{count},qfq")
+        resp = requests.get(url, timeout=10)
+        if resp.status_code != 200:
+            return []
+        data = resp.json().get('data', {}).get(symbol, {})
+        klines = data.get('qfqday') or data.get('day') or []
+        out = []
+        for k in klines:
+            if len(k) < 6:
+                continue
+            out.append({'day': k[0], 'open': k[1], 'close': k[2],
+                        'high': k[3], 'low': k[4]})
+        return out
+    except Exception:
+        return []
+
+
+def _backtest_one(etf: Dict) -> Optional[Dict]:
+    """单只 ETF 的历史超跌回溯统计。失败返回 None。"""
+    try:
+        symbol = f"{etf['market']}{etf['code']}"
+        rows = _fetch_daily(symbol, BT_FETCH_DAYS)
+        if len(rows) < MA_PERIOD + BT_HORIZON + 10:
+            return None
+
+        df = pd.DataFrame(rows)
+        for col in ('open', 'high', 'low', 'close'):
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        df = df.dropna(subset=['open', 'high', 'low', 'close']).reset_index(drop=True)
+        if len(df) < MA_PERIOD + BT_HORIZON + 10:
+            return None
+
+        lower = df['close'].rolling(MA_PERIOD).mean() * (1 - ENE_LOWER_PCT)
+        n = len(df)
+        recs = []
+        last_hit = -999
+        for i in range(MA_PERIOD - 1, n - BT_HORIZON):
+            lb = lower.iloc[i]
+            if pd.isna(lb) or lb <= 0:
+                continue
+            if float(df['low'].iloc[i]) > float(lb):
+                continue
+            if i - last_hit <= BT_DEDUP_GAP:
+                continue
+            buy = min(float(df['open'].iloc[i]), float(lb))
+            if buy <= 0:
+                continue
+            seg = df['high'].iloc[i + 1:i + 1 + BT_HORIZON].values.astype(float)
+            if len(seg) < BT_HORIZON:
+                continue
+            k = int(np.argmax(seg))
+            last_hit = i
+            recs.append({
+                'date': str(df['day'].iloc[i]),
+                'buy': round(buy, 4),
+                'max_ret': round((float(seg[k]) / buy - 1) * 100, 2),
+                'day': k + 1,
+                'max_date': str(df['day'].iloc[i + 1 + k]),
+            })
+
+        # 只保留最近 2 年（以最后一根 K 线为基准）
+        cutoff = pd.to_datetime(df['day'].iloc[-1]) - pd.DateOffset(years=BT_YEARS)
+        recs = [r for r in recs if pd.to_datetime(r['date']) >= cutoff]
+        if not recs:
+            return {'years': BT_YEARS, 'count': 0, 'recent': [], 'by_day': []}
+
+        rets = [r['max_ret'] for r in recs]
+        by_day = []
+        for d in (1, 2, 3):
+            hit = [r['max_ret'] for r in recs if r['day'] == d]
+            if hit:
+                by_day.append({'day': d, 'count': len(hit),
+                               'avg': round(float(np.mean(hit)), 2)})
+
+        recent = sorted(recs, key=lambda r: r['date'], reverse=True)[:BT_MAX_TRADES]
+        return {
+            'years': BT_YEARS,
+            'count': len(recs),
+            'win_rate': round(sum(1 for x in rets if x > 0) / len(rets) * 100, 1),
+            'avg_max': round(float(np.mean(rets)), 2),
+            'median_max': round(float(np.median(rets)), 2),
+            'best_max': round(max(rets), 2),
+            'worst_max': round(min(rets), 2),
+            'by_day': by_day,
+            'recent': recent,
+        }
+    except Exception:
+        return None
+
+
+def _load_bt_cache() -> Dict:
+    try:
+        with open(BT_CACHE_FILE, 'r') as f:
+            c = json.load(f)
+        if isinstance(c, dict) and isinstance(c.get('items'), dict):
+            return c['items']
+    except Exception:
+        pass
+    return {}
+
+
+def _save_bt_cache(items: Dict):
+    try:
+        with open(BT_CACHE_FILE, 'w') as f:
+            json.dump({'items': items}, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def attach_backtest(etfs: List[Dict]) -> List[Dict]:
+    """给前端要展示的标的补上近 2 年超跌回溯（带 30 分钟缓存）。"""
+    if not etfs:
+        return etfs
+    items = _load_bt_cache()
+    now = time.time()
+    todo = []
+    for etf in etfs:
+        key = f"{etf['market']}{etf['code']}"
+        hit = items.get(key)
+        if hit and now - float(hit.get('ts') or 0) < BT_CACHE_TTL:
+            etf['bt'] = hit.get('bt')
+        elif hit and hit.get('bt'):
+            etf['bt'] = hit.get('bt')   # 过期但抓取失败时退回旧结果
+            todo.append(etf)
+        else:
+            todo.append(etf)
+
+    if todo:
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = {executor.submit(_backtest_one, e): e for e in todo}
+            for future in as_completed(futures):
+                etf = futures[future]
+                try:
+                    bt = future.result()
+                except Exception:
+                    bt = None
+                if bt:
+                    etf['bt'] = bt
+                    items[f"{etf['market']}{etf['code']}"] = {'ts': now, 'bt': bt}
+        _save_bt_cache(items)
+    return etfs
+
+
 if __name__ == '__main__':
     import sys
-    is_quiet = '--quiet' in sys.argv
-    
+    is_quiet = '--quiet' in sys.argv    
     if not is_quiet:
         if not is_quiet:
                     print("ETF超跌策略分析", file=sys.stderr)
@@ -768,6 +935,11 @@ if __name__ == '__main__':
     # 输出结果（始终输出JSON）
     broad_etfs = [e for e in oversold_etfs if e['group'] == 'broad']
     sector_etfs = [e for e in oversold_etfs if e['group'] == 'sector']
+    broad_top = broad_etfs[:10]
+    sector_top = sector_etfs[:10]
+
+    # 只给前端展示的这 20 只补「近 2 年超跌回溯」，不为全量 100+ 只拉 2 年日线
+    attach_backtest(broad_top + sector_top)
 
     result = {
         'code': 200,
@@ -780,8 +952,8 @@ if __name__ == '__main__':
                 'sectorTotal': len(sector_etfs)
             },
             # 两个组各自按距离 ENE 下轨从近到远排序，各取前 10
-            'broad': broad_etfs[:10],
-            'sector': sector_etfs[:10],
+            'broad': broad_top,
+            'sector': sector_top,
             # 兼容字段：全局最超跌的 10 只（老前端仍可读）
             'etfs': oversold_etfs[:10]
         }
