@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { gzipSync } from 'node:zlib';
 
 // API 基础 URL - 从环境变量读取，移除尾随斜杠；未配置时回退到本地后端
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
@@ -15,10 +16,10 @@ function mapEtf(etf: any) {
     lowerBand: etf.lower_band,
     distanceToLower: etf.dist_to_lower,
     avgMoney: etf.avg_money || 0,
-    // 近 2 年超跌回溯：T 日碰下轨买入 → T+1~T+3 盘中最大收益
+    // 近 3 年超跌回溯：T 日碰下轨买入 → T+1~T+3 盘中最大收益
     bt: bt
       ? {
-          years: bt.years ?? 2,
+          years: bt.years ?? 3,
           count: bt.count ?? 0,
           winRate: bt.win_rate ?? null,
           avgMax: bt.avg_max ?? null,
@@ -30,7 +31,8 @@ function mapEtf(etf: any) {
             count: d.count,
             avg: d.avg,
           })),
-          recent: (bt.recent || []).map((t: any) => ({
+          // 全部触发明细，按日期倒序，前端一个不落地列出
+          trades: (bt.trades || []).map((t: any) => ({
             date: t.date,
             buy: t.buy,
             maxRet: t.max_ret,
@@ -42,7 +44,7 @@ function mapEtf(etf: any) {
   };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     // 调用 FastAPI 后端服务
     const response = await fetch(`${API_BASE_URL}/api/strategy/oversold`, {
@@ -62,10 +64,13 @@ export async function GET() {
 
     const summary = result.data?.summary;
 
-    return NextResponse.json({
+    // etfs 只是给老前端的兼容字段，明细已在 broad/sector 里给过，这里不再重复传
+    const etfsSlim = etfs.map((e: any) => ({ ...e, bt: null }));
+
+    const json = JSON.stringify({
       code: 200,
       data: {
-        etfs,
+        etfs: etfsSlim,
         broad,
         sector,
         recommend: etfs.slice(0, 3).map((e: any) => e.name),
@@ -82,6 +87,34 @@ export async function GET() {
               },
       },
       message: 'success',
+    });
+
+    const headers: Record<string, string> = { 'cache-control': 'no-store' };
+    const serverCost = response.headers.get('X-Server-Cost');
+    if (serverCost) headers['X-Server-Cost'] = serverCost;
+
+    // 20 只标的的全部触发明细后，响应会涨到几十 KB。云服务器出口只有 1~5Mbps，
+    // 后端那层 gzip 会被 Next 的 fetch 自动解压掉，压缩必须放在这一跳才生效。
+    const acceptEncoding = request.headers.get('accept-encoding') || '';
+    if (acceptEncoding.includes('gzip') && json.length > 1024) {
+      const gz = gzipSync(Buffer.from(json, 'utf8'), { level: 6 });
+      return new Response(gz as unknown as BodyInit, {
+        status: 200,
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+          'content-encoding': 'gzip',
+          'vary': 'Accept-Encoding',
+          ...headers,
+        },
+      });
+    }
+
+    return new Response(json, {
+      status: 200,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        ...headers,
+      },
     });
   } catch (error: any) {
     console.error('获取超跌策略失败:', error);

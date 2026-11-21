@@ -64,8 +64,8 @@ export interface OversoldBacktest {
   worstMax: number | null;
   /** 最大收益落在 +1/+2/+3 的分布 */
   byDay: { day: number; count: number; avg: number }[];
-  /** 最近若干次明细（按日期倒序） */
-  recent: OversoldTrade[];
+  /** 全部触发明细，按日期倒序 */
+  trades: OversoldTrade[];
 }
 
 export interface OversoldETF {

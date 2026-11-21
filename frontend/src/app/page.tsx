@@ -80,7 +80,8 @@ interface OversoldBacktest {
   bestMax: number | null;
   worstMax: number | null;
   byDay: { day: number; count: number; avg: number }[];
-  recent: OversoldTrade[];
+  /** 全部触发明细，按日期倒序 */
+  trades: OversoldTrade[];
 }
 
 interface OversoldETF {
@@ -487,7 +488,7 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {bt.recent.map((t) => (
+                      {bt.trades.map((t) => (
                         <tr key={t.date} className="border-t border-slate-50">
                           <td className="py-1.5 px-2 text-slate-600">{t.date}</td>
                           <td className="py-1.5 px-2 text-right text-slate-600">{t.buy.toFixed(3)}</td>
@@ -502,8 +503,7 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
                 </div>
                 <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
                   T 日盘中触及下轨即买入（成交价取下轨与开盘价中较低者），统计 T+1~T+3 盘中最高价的最大浮盈；
-                  连续触轨按不同交易日分别计入，用日线高低点近似盘中。
-                  {bt.count > bt.recent.length && ` 共 ${bt.count} 次，此处列最近 ${bt.recent.length} 次。`}
+                  连续触轨按不同交易日分别计入，用日线高低点近似盘中。共 {bt.count} 次，全部列出。
                 </p>
               </div>
             )}

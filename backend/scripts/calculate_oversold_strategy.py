@@ -702,7 +702,6 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
 BT_YEARS = 3            # 回溯年数
 BT_FETCH_DAYS = 800     # 拉取日线根数（3 年约 730 根，留出 MA10 预热余量，接口上限）
 BT_HORIZON = 3          # 买入后观察 3 个交易日
-BT_MAX_TRADES = 6       # 明细最多返回最近 6 次
 BT_CACHE_TTL = 1800     # 回溯结果缓存 30 分钟（盘中高低点会变，不宜整天复用）
 BT_CACHE_FILE = os.path.join(DATA_DIR, 'oversold_backtest_cache.json')
 
@@ -774,7 +773,7 @@ def _backtest_one(etf: Dict) -> Optional[Dict]:
         cutoff = pd.to_datetime(df['day'].iloc[-1]) - pd.DateOffset(years=BT_YEARS)
         recs = [r for r in recs if pd.to_datetime(r['date']) >= cutoff]
         if not recs:
-            return {'years': BT_YEARS, 'count': 0, 'recent': [], 'by_day': []}
+            return {'years': BT_YEARS, 'count': 0, 'trades': [], 'by_day': []}
 
         rets = [r['max_ret'] for r in recs]
         by_day = []
@@ -784,7 +783,8 @@ def _backtest_one(etf: Dict) -> Optional[Dict]:
                 by_day.append({'day': d, 'count': len(hit),
                                'avg': round(float(np.mean(hit)), 2)})
 
-        recent = sorted(recs, key=lambda r: r['date'], reverse=True)[:BT_MAX_TRADES]
+        # 全部明细按日期倒序返回，前端一个不落地列出
+        trades = sorted(recs, key=lambda r: r['date'], reverse=True)
         return {
             'years': BT_YEARS,
             'count': len(recs),
@@ -794,7 +794,7 @@ def _backtest_one(etf: Dict) -> Optional[Dict]:
             'best_max': round(max(rets), 2),
             'worst_max': round(min(rets), 2),
             'by_day': by_day,
-            'recent': recent,
+            'trades': trades,
         }
     except Exception:
         return None
