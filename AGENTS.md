@@ -1,48 +1,61 @@
-# ETF轮动策略 - 网页版
+# 策略金库
 
 ## 项目概述
 
-基于微信小程序 ETF 轮动策略的移动端适配网页版本。
+多策略信号台，按日给出 A股 / 美股 / 资金面 的可执行信号。目前包含六个策略：
+
+| 策略 | 标的 | 方法论 |
+|------|------|--------|
+| 趋势轮动 | A股 ETF | 25 日动量 + R² 稳定性加权 |
+| 均值回归 | A股 ETF | 偏离均值后的回归 |
+| 超跌策略 | A股 ETF | ENE 下轨触轨反弹 |
+| 美股MA200趋势 | 美股 ETF | 长期均线定方向 |
+| 市场情绪 | A股大盘 / 股债 | 择时指标（含股债收益差分位） |
+| 国家队监控 | A股 ETF | 资金面（净申购、放量） |
 
 ## 技术栈
 
-- **前端框架**: Next.js 16 (App Router)
-- **UI组件**: shadcn/ui + Tailwind CSS 4
-- **后端**: NestJS (独立服务，端口 3000)
-- **数据**: 模拟数据（用于预览）
+- **前端**: Next.js 16 (App Router) + shadcn/ui + Tailwind CSS 4，API 走 `app/api/strategy/*` 代理层
+- **后端**: Python FastAPI（`backend/main.py`），策略实现在 `backend/scripts/*.py`，由常驻 worker 池调度
+- **数据**: 腾讯 / 东方财富实时行情接口，落盘缓存于 `DATA_DIR`
+- **部署**: Docker Compose + systemd timer 自动部署（见 `scripts/autodeploy.sh`）
 
 ## 目录结构
 
 ```
 .
-├── src/
-│   ├── app/
-│   │   ├── layout.tsx          # 根布局
-│   │   ├── page.tsx           # ETF策略主页
-│   │   └── globals.css        # 全局样式
-│   ├── components/ui/         # shadcn/ui 组件库
-│   ├── lib/
-│   │   └── api.ts             # API客户端
-│   └── server.ts              # 自定义服务入口（含API代理）
-├── server/                    # NestJS 后端
-│   ├── src/
-│   │   └── modules/strategy/  # 策略模块
-│   └── package.json
-└── .coze                      # Coze CLI 配置
+├── frontend/                  # Next.js 前端
+│   └── src/
+│       ├── app/
+│       │   ├── layout.tsx     # 根布局（站点标题/描述在这里改）
+│       │   ├── page.tsx       # 全部策略的单页视图
+│       │   └── api/strategy/  # 各策略代理层（snake_case → camelCase）
+│       └── lib/api.ts         # 前端类型与请求封装
+├── backend/
+│   ├── main.py                # FastAPI 入口、脚本调度、响应瘦身
+│   └── scripts/               # 各策略计算脚本 + worker_pool.py
+├── scripts/autodeploy.sh      # 自动部署与回滚
+└── docs/                      # 部署、性能排查记录
 ```
 
 ## API 接口
 
 | 接口 | 方法 | 说明 |
 |------|------|------|
-| `/strategy/etf-rotation` | GET | 趋势轮动策略 |
-| `/strategy/oversold` | GET | 超跌策略 |
+| `/api/strategy/etf-rotation` | GET | 趋势轮动策略 |
+| `/api/strategy/oversold` | GET | 超跌策略（含近 3 年触轨回溯） |
+| `/api/strategy/mean-reversion` | GET | 均值回归策略 |
+| `/api/strategy/ma200-trend` | GET | 美股 MA200 趋势 |
+| `/api/strategy/cyb-dividend` | GET | 市场情绪（股债收益差等） |
+| `/api/strategy/national-team` | GET | 国家队监控 |
+| `/api/health` | GET | 健康检查，回显 `DEPLOY_SHA` |
 
 ## 策略逻辑
 
 ### 趋势轮动策略
 - **回看周期**: 25 个交易日
-- **筛选条件**: 动量得分 >= 0.0
+- **筛选条件**: 收益得分（年化收益）>= -0.1 且状态正常，才进建议持仓
+- **候选池**: 城投债 / 纳指 / 黄金 / 创业板 / 科创50 / 科创100 / 科创200，池外只作分数参考
 - **稳定性**: R² 加权
 - **风控**: 近3日单日跌幅超过3%则拦截
 
@@ -70,8 +83,8 @@ pnpm install
 # 启动前端开发服务器（端口5000）
 pnpm dev
 
-# 启动后端服务（端口3000）
-cd server && pnpm install && pnpm start
+# 启动后端服务（端口 3000）
+cd backend && pip3 install -r requirements.txt && uvicorn main:app --port 3000
 
 # 单独运行超跌策略
 cd backend && python3 scripts/calculate_oversold_strategy.py [--quiet]
@@ -118,6 +131,6 @@ load_kline_cache() → 检查 _date == today:
 
 ## 注意事项
 
-1. 当前使用模拟数据，需接入真实数据源才能用于实际投资决策
-2. 数据仅供参考，不构成投资建议
+1. 行情来自腾讯 / 东方财富公开接口，非交易所直连，极端行情下可能有延迟或断点
+2. 数据与信号仅供参考，不构成投资建议
 3. 市场有风险，投资需谨慎

@@ -12,53 +12,37 @@ export const viewport: Viewport = {
   ],
 };
 
+const SITE_NAME = '策略金库';
+const SITE_DESC =
+  '多策略信号台 · A股 / 美股 / 资金面：趋势轮动、均值回归、超跌反弹、美股MA200、市场情绪、国家队监控，多角度给出当前该往哪走。';
+
 export const metadata: Metadata = {
   title: {
-    default: 'ETF轮动策略',
-    template: '%s | ETF轮动策略',
+    default: SITE_NAME,
+    template: `%s | ${SITE_NAME}`,
   },
-  description: '智能ETF轮动策略，基于25日动量得分筛选，配合R²稳定性加权分析，助您把握市场趋势',
+  description: SITE_DESC,
   keywords: [
-    '扣子编程',
-    'Coze Code',
-    'Vibe Coding',
-    'AI 编程',
-    '智能体搭建',
-    '工作流搭建',
-    '网站搭建',
-    '网站部署',
-    '全栈开发',
-    'AI 工程师',
+    'ETF',
+    'ETF轮动',
+    '动量策略',
+    '均值回归',
+    '超跌反弹',
+    'ENE下轨',
+    '美股MA200',
+    '市场情绪',
+    '股债收益差',
+    '国家队',
+    '量化策略',
   ],
-  authors: [{ name: 'Coze Code Team', url: 'https://code.coze.cn' }],
-  generator: 'Coze Code',
-  // icons: {
-  //   icon: '',
-  // },
+  generator: SITE_NAME,
   openGraph: {
-    title: '扣子编程 | 你的 AI 工程师已就位',
-    description:
-      '我正在使用扣子编程 Vibe Coding，让创意瞬间上线。告别拖拽，拥抱心流。',
-    url: 'https://code.coze.cn',
-    siteName: '扣子编程',
+    title: SITE_NAME,
+    description: SITE_DESC,
+    siteName: SITE_NAME,
     locale: 'zh_CN',
     type: 'website',
-    // images: [
-    //   {
-    //     url: '',
-    //     width: 1200,
-    //     height: 630,
-    //     alt: '扣子编程 - 你的 AI 工程师',
-    //   },
-    // ],
   },
-  // twitter: {
-  //   card: 'summary_large_image',
-  //   title: 'Coze Code | Your AI Engineer is Here',
-  //   description:
-  //     'Build and deploy full-stack applications through AI conversation. No env setup, just flow.',
-  //   // images: [''],
-  // },
   robots: {
     index: true,
     follow: true,
@@ -71,7 +55,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="zh-CN">
       <body className={`antialiased`}>
         {children}
       </body>

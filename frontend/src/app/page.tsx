@@ -1000,11 +1000,16 @@ export default function ETFRotationPage() {
       <header className="sticky top-0 z-10 bg-white border-b border-slate-200">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-xl font-bold text-slate-800">ETF轮动策略</h1>
-              <p className="text-xs text-slate-400">
-                {isNationalTeamMode ? '国家队监控' : isCybDividendMode ? '市场情绪' : isMa200TrendMode ? '美股MA200趋势' : isMeanReversionMode ? '均值回归' : isOversoldMode ? '超跌策略' : '趋势轮动'}
-              </p>
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-slate-800 to-slate-600 flex items-center justify-center shrink-0">
+                <span className="text-white text-sm font-bold">策</span>
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-slate-800 leading-tight">策略金库</h1>
+                <p className="text-xs text-slate-400">
+                  {isNationalTeamMode ? '国家队监控' : isCybDividendMode ? '市场情绪' : isMa200TrendMode ? '美股MA200趋势' : isMeanReversionMode ? '均值回归' : isOversoldMode ? '超跌策略' : '趋势轮动'}
+                </p>
+              </div>
             </div>
             
             <div className="flex items-center gap-2">
