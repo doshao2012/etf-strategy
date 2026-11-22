@@ -230,7 +230,7 @@ def _compute_etf_rotation():
         # 原来前置的 fetch_market_data_from_db.py 硬编码了旧项目路径
         # （/app/server/...），产出的 etf-real-data.config.ts 无人引用，
         # 却让每次请求多跑一个进程，已移除。
-        python_result = _run_script("calculate_momentum_joinquant.py", ["25", "0", "0.97"])
+        python_result = _run_script("calculate_momentum_joinquant.py", ["25", "-0.1", "0.97"])
         if python_result.get("code") != 200:
             return python_result
 

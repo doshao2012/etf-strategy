@@ -110,6 +110,8 @@ interface RotationResponse {
     summary: {
       total: number;
       recommended: number;
+      qualified?: number;
+      minAnnReturn?: number;
       topPick: string;
       recommendable?: number;
     };
@@ -1320,6 +1322,17 @@ export default function ETFRotationPage() {
 </p>
                       </div>
                     </div>
+                    <p className="text-[11px] text-slate-500 pt-1.5 leading-relaxed">
+                      <span className="font-medium text-slate-600">建议持仓：</span>
+                      只在候选池（城投债 / 纳指 / 黄金 / 创业板 / 科创50 / 科创100 / 科创200）内、
+                      且<span className="font-semibold text-blue-600">
+                        收益得分 ≥ {rotationView?.data.summary?.minAnnReturn ?? -0.1}
+                      </span>
+                      、状态正常的标的里取收益得分最高的一只；池外标的只做分数参考，都不满足则空仓。
+                      <span className="text-slate-400">
+                        {' '}当前池内达标 {rotationView?.data.summary?.recommended ?? 0} 只。
+                      </span>
+                    </p>
                   </div>
                 )}
               </CardContent>

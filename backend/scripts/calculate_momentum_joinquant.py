@@ -379,7 +379,7 @@ RECOMMENDABLE_CODES = {
 }
 
 
-def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97):
+def get_metrics(etf_info, lookback_days=25, min_ann_return=-0.1, loss_limit=0.97):
     """
     完全按照聚宽算法实现的动量计算
 
@@ -388,7 +388,7 @@ def get_metrics(etf_info, lookback_days=25, score_threshold=0.0, loss_limit=0.97
     Args:
         etf_info: ETF信息字典，包含code、name和data
         lookback_days: 动量计算周期（默认25）
-        score_threshold: 策略买入阈值（默认0.0）
+        min_ann_return: 「收益得分」（年化收益）下限，达标才进建议持仓（默认 -0.1）
         loss_limit: 近3日单日跌幅限制（默认0.97，即3%）
 
     Returns:
@@ -523,7 +523,8 @@ def main():
     """主函数"""
     # 参数
     lookback_days = int(sys.argv[1]) if len(sys.argv) > 1 else 25
-    score_threshold = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0
+    # argv[2] 是「收益得分」下限（年化收益，小数形式，-0.1 = -10%）
+    min_ann_return = float(sys.argv[2]) if len(sys.argv) > 2 else -0.1
     loss_limit = float(sys.argv[3]) if len(sys.argv) > 3 else 0.97
 
     # 加载数据
@@ -532,7 +533,7 @@ def main():
     # 计算所有ETF的指标
     results = []
     for code, etf_info in etfs.items():
-        metrics = get_metrics(etf_info, lookback_days, score_threshold, loss_limit)
+        metrics = get_metrics(etf_info, lookback_days, min_ann_return, loss_limit)
         if metrics:
             results.append(metrics)
 
@@ -545,7 +546,11 @@ def main():
     # 建议持仓只在候选池内、且状态正常的标的里取「收益得分」最高的那只
     #（pickable 继承上面的排序，所以正好是列表里第一只合格的）。
     # 池外标的分数再高也进不了建议——它们只作分数参考。
-    valid_etfs = [r for r in results if r['score'] >= score_threshold]
+    #
+    # 门槛用「收益得分」ann_return（年化收益），不是动量得分 score：
+    # 卡片上第一眼看到的就是收益得分，用它做门槛才和页面口径一致。
+    valid_etfs = [r for r in results
+                  if r.get('ann_return') is not None and r['ann_return'] >= min_ann_return]
     pickable = [r for r in valid_etfs if r.get('recommendable') and r.get('status') == '正常']
     recommend = pickable[0]['code'] if pickable else None
 
@@ -571,9 +576,14 @@ def main():
             'recommend': recommend,
             'summary': {
                 'total': len(results),
+                # 收益得分达标的数量（含池外，仅作参考）
                 'valid': len(valid_etfs),
+                # 真正能进建议持仓的：池内 + 达标 + 状态正常
+                'pickable': len(pickable),
                 'recommendable': len([r for r in results if r.get('recommendable')]),
-                'filtered': len([r for r in results if r['status'] != '正常'])
+                'filtered': len([r for r in results if r['status'] != '正常']),
+                # 下发给前端展示规则，改参数不用再改前端文案
+                'min_ann_return': min_ann_return
             }
         }
     }

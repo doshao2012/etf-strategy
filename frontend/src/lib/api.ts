@@ -30,7 +30,12 @@ export interface StrategyResponse {
     dataSource: string;
     summary: {
       total: number;
+      /** 池内 + 收益得分达标 + 状态正常的数量（能进建议持仓的） */
       recommended?: number;
+      /** 收益得分达标的数量（含池外，仅参考） */
+      qualified?: number;
+      /** 建议持仓的收益得分下限，默认 -0.1 */
+      minAnnReturn?: number;
       topPick: string;
       oversoldSignals?: number;
     };

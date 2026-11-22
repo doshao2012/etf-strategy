@@ -73,7 +73,12 @@ export async function GET() {
         dataSource: '快照数据',
         summary: {
           total: pythonResult.data.summary?.total || 0,
-          recommended: pythonResult.data.summary?.valid || 0,
+          // pickable = 池内 + 收益得分达标 + 状态正常，才是真正能进建议持仓的
+          recommended: pythonResult.data.summary?.pickable
+            ?? pythonResult.data.summary?.valid
+            ?? 0,
+          qualified: pythonResult.data.summary?.valid || 0,
+          minAnnReturn: pythonResult.data.summary?.min_ann_return ?? -0.1,
           topPick: recommendData?.name || '',
         },
       },
