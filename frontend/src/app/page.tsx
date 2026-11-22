@@ -1001,11 +1001,11 @@ export default function ETFRotationPage() {
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-lg bg-[#f5f3ff] flex items-center justify-center shrink-0">
-                <Layers className="w-[22px] h-[22px] text-[#7c3aed]" strokeWidth={2.2} />
+              <div className="w-9 h-9 rounded-lg bg-[#eef2ff] flex items-center justify-center shrink-0">
+                <Layers className="w-[22px] h-[22px] text-[#4f46e5]" strokeWidth={2.2} />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-[#6d28d9] leading-tight">策略金库</h1>
+                <h1 className="text-xl font-bold text-[#4338ca] leading-tight">策略金库</h1>
                 <p className="text-xs text-slate-400">
                   {isNationalTeamMode ? '国家队监控' : isCybDividendMode ? '市场情绪' : isMa200TrendMode ? '美股MA200趋势' : isMeanReversionMode ? '均值回归' : isOversoldMode ? '超跌策略' : '趋势轮动'}
                 </p>
