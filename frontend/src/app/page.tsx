@@ -1298,6 +1298,44 @@ export default function ETFRotationPage() {
                       </div>
                     </div>
                   </div>
+                ) : isOversoldMode ? (
+                  <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1">
+                    <p className="font-medium text-slate-700 mb-1">
+                      操作规则：ENE 下轨 = MA10 × 0.91，跌破即建仓，越跌越加，分批止盈
+                    </p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="bg-blue-50 rounded p-2">
+                        <p className="font-medium text-blue-700 text-xs">建仓 1/4</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">
+                          T 日盘中第一次跌破下轨，买 1/4<br />
+                          不便盯盘 → 收盘前买<br />
+                          或第二天开盘买，同为 1/4
+                        </p>
+                      </div>
+                      <div className="bg-amber-50 rounded p-2">
+                        <p className="font-medium text-amber-600 text-xs">加仓 1/4 → 1/2</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">
+                          T+1 日起，每再跌 1ATR 加一档<br />
+                          先加 1/4，再加 1/2<br />
+                          三档合计满仓（1ATR ≈ 4%）
+                        </p>
+                      </div>
+                      <div className="bg-emerald-50 rounded p-2">
+                        <p className="font-medium text-emerald-600 text-xs">止盈 1~2ATR</p>
+                        <p className="text-slate-500 text-[11px] leading-relaxed">
+                          均价 +1ATR 先卖一半<br />
+                          +2ATR 清掉剩下的<br />
+                          满 10 个交易日未达标 → 收盘了结
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-slate-500 text-[11px] pt-1.5 leading-relaxed">
+                      <span className="font-medium text-slate-600">加仓档位从首次建仓价往下数，止盈从加仓后的持仓均价往上数</span>
+                      —— 所以跌下去加过仓的，均价被拉低，1ATR 的止盈反而更容易够到。
+                      1ATR 取 14 日平均真实波幅（各标的数值见卡片）。不设硬止损，靠「首笔只投 1/4」的仓位结构控风险，
+                      跌破下轨后继续阴跌属于这套规则预期内的情形。
+                    </p>
+                  </div>
                 ) : (
                   <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 space-y-1">
                     <p className="font-medium text-slate-700 mb-1">操作规则：</p>
