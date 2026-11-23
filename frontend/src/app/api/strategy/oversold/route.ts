@@ -15,6 +15,8 @@ function mapEtf(etf: any) {
     ma10: etf.ma10,
     lowerBand: etf.lower_band,
     distanceToLower: etf.dist_to_lower,
+    atr20: etf.atr20 ?? null,
+    atr20Pct: etf.atr20_pct ?? null,
     avgMoney: etf.avg_money || 0,
     // 近 3 年超跌回溯：T 日碰下轨买入 → T+1~T+3 盘中最大收益
     bt: bt

@@ -95,6 +95,10 @@ interface OversoldETF {
   ma10: number;
   lowerBand: number;
   distanceToLower: number;
+  /** ATR(20)：20 日平均真实波幅，加仓/止盈的 1ATR 基准 */
+  atr20?: number | null;
+  /** ATR(20) 占当前价格的百分比 */
+  atr20Pct?: number | null;
   avgMoney: number;
   bt?: OversoldBacktest | null;
 }
@@ -424,7 +428,7 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
         </div>
 
         {/* 辅助数据 */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <div className="bg-slate-50 rounded-lg p-3">
             <p className="text-xs text-slate-500 mb-1">10日均线</p>
             <p className="text-base font-semibold text-slate-700">{(etf.ma10 ?? 0).toFixed(3)}</p>
@@ -433,6 +437,17 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
             <p className="text-xs text-slate-500 mb-1">距ENE下轨</p>
             <p className={`text-base font-semibold ${isNearLower ? 'text-amber-500' : 'text-slate-700'}`}>
               {(etf.distanceToLower ?? 0).toFixed(2)}%
+            </p>
+          </div>
+          <div className="bg-slate-50 rounded-lg p-3" title="ATR(20) = 近 20 个交易日真实波幅的均值，加仓与止盈的 1ATR 都按它算">
+            <p className="text-xs text-slate-500 mb-1">ATR(20)</p>
+            <p className="text-base font-semibold text-slate-700">
+              {etf.atr20 != null ? etf.atr20.toFixed(3) : '—'}
+              {etf.atr20Pct != null && (
+                <span className="ml-1.5 text-xs font-normal text-slate-400">
+                  ≈{etf.atr20Pct.toFixed(2)}%
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -1317,7 +1332,7 @@ export default function ETFRotationPage() {
                         <p className="text-slate-500 text-[11px] leading-relaxed">
                           T+1 日起，每再跌 1ATR 加一档<br />
                           先加 1/4，再加 1/2<br />
-                          三档合计满仓（1ATR ≈ 4%）
+                          三档合计满仓 · 1ATR 见卡片 ATR(20)
                         </p>
                       </div>
                       <div className="bg-emerald-50 rounded p-2">
@@ -1325,15 +1340,15 @@ export default function ETFRotationPage() {
                         <p className="text-slate-500 text-[11px] leading-relaxed">
                           均价 +1ATR 先卖一半<br />
                           +2ATR 清掉剩下的<br />
-                          满 10 个交易日未达标 → 收盘了结
+                          最后一次加仓后第 3 个交易日收盘 → 了结
                         </p>
                       </div>
                     </div>
                     <p className="text-slate-500 text-[11px] pt-1.5 leading-relaxed">
                       <span className="font-medium text-slate-600">加仓档位从首次建仓价往下数，止盈从加仓后的持仓均价往上数</span>
                       —— 所以跌下去加过仓的，均价被拉低，1ATR 的止盈反而更容易够到。
-                      1ATR 取 14 日平均真实波幅（各标的数值见卡片）。分批卖出的比例（几成在 1ATR、几成留到 2ATR）可自行调整；
-                      10 个交易日是持有上限，到期无论盈亏都按收盘价了结。
+                      1ATR 取 20 日平均真实波幅（卡片上的 ATR(20)）。分批卖出的比例（几成在 1ATR、几成留到 2ATR）可自行调整；
+                      <span className="font-medium text-slate-600">持有期从最后一次加仓日起算</span>，第 3 个交易日收盘无论盈亏都了结，没加过仓就是从建仓日算。
                       不设硬止损，靠「首笔只投 1/4」的仓位结构控风险，跌破下轨后继续阴跌属于这套规则预期内的情形。
                     </p>
                   </div>

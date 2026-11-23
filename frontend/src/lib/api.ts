@@ -87,6 +87,10 @@ export interface OversoldETF {
   ma10: number;
   lowerBand: number;
   distanceToLower: number;
+  /** ATR(20)：20 日平均真实波幅，加仓/止盈的 1ATR 基准 */
+  atr20?: number | null;
+  /** ATR(20) 占当前价格的百分比 */
+  atr20Pct?: number | null;
   avgMoney: number;
   bt?: OversoldBacktest | null;
 }

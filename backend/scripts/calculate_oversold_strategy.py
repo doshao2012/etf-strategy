@@ -29,6 +29,7 @@ VERBOSE = False
 MIN_MONEY_W = 10000  # 最小日均成交额（万元）- 1亿
 LOOKBACK_DAYS = 20  # 成交额统计天数
 MA_PERIOD = 10  # MA周期
+ATR_PERIOD = 20  # ATR周期（加仓/止盈的 1ATR 都以 20 日平均真实波幅为准）
 ENE_LOWER_PCT = 0.09  # 下轨偏离度 9%
 
 # 缓存文件路径
@@ -347,9 +348,9 @@ def get_etf_volume(etf_code: str, market: str) -> Optional[float]:
     获取ETF前一日成交额（万元），顺便缓存K线数据供后续复用
     """
     try:
-        # 获取最近9天的K线数据（成交额用最后一天，K线缓存给后续分析）
+        # 一次抓够 ATR(20) 需要的 21 根，成交额用最后一天，K线缓存给后续分析复用
         symbol = f"{market}{etf_code}"
-        url = f"http://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get?param={symbol},day,,,10,qfq"
+        url = f"http://proxy.finance.qq.com/ifzqgtimg/appstock/app/fqkline/get?param={symbol},day,,,40,qfq"
 
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
@@ -630,13 +631,29 @@ def get_realtime_price(etf_code: str, market: str) -> tuple[Optional[float], Opt
     return None, None, None
 
 
+def calc_atr(df: pd.DataFrame, period: int = ATR_PERIOD) -> Optional[float]:
+    """ATR(period)：真实波幅的简单均值。加到最后一根完整日线，盘中不含当日未走完的那根。"""
+    try:
+        if df is None or df.empty or len(df) < period + 1:
+            return None
+        h = df['high'].astype(float)
+        l = df['low'].astype(float)
+        c = df['close'].astype(float)
+        pc = c.shift(1)
+        tr = pd.concat([h - l, (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
+        val = tr.rolling(period).mean().iloc[-1]
+        return float(val) if pd.notna(val) else None
+    except Exception:
+        return None
+
+
 def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
     """计算超跌分析（并行请求）"""
     results = []
     
     def analyze_one(etf):
         try:
-            historical_df = get_historical_data(etf['code'], etf['market'], count=10)
+            historical_df = get_historical_data(etf['code'], etf['market'], count=ATR_PERIOD + 10)
             if historical_df.empty or len(historical_df) < 10:
                 return None
             
@@ -645,7 +662,8 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
                 return None
             
             # 检查腾讯交易日期与K线最新日期是否一致（判断是否交易日）
-            closes = historical_df['close'].astype(float)
+            # K 线多取了 20 根给 ATR 用，MA10 只取最后 10 根
+            closes = historical_df['close'].astype(float).iloc[-10:]
             last_day = str(historical_df['day'].iloc[-1]) if 'day' in historical_df.columns else ''
             
             if trade_date and trade_date == last_day:
@@ -660,6 +678,7 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
             
             lower_band = dynamic_ma10 * (1 - ENE_LOWER_PCT)
             dist_to_lower = (current_price - lower_band) / lower_band * 100
+            atr = calc_atr(historical_df)
             
             return {
                 'code': etf['code'],
@@ -670,6 +689,8 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
                 'ma10': round(dynamic_ma10, 3),
                 'lower_band': round(lower_band, 3),
                 'dist_to_lower': round(dist_to_lower, 2),
+                'atr20': round(atr, 4) if atr else None,
+                'atr20_pct': round(atr / current_price * 100, 2) if atr and current_price else None,
                 'avg_money': round(etf.get('volume', 0), 0),
                 'category': etf.get('category', '其他'),
                 'group': etf_group(etf)
