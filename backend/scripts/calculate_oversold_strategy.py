@@ -559,7 +559,26 @@ def _days_old(day_str) -> int:
         return 9999
 
 
-def get_historical_data(etf_code: str, market: str, count: int = 10) -> pd.DataFrame:
+def _is_fresh(last_day, expect_day=None) -> bool:
+    """缓存最后一根K线是否够新。
+
+    有实时交易日（expect_day）时按「自然日差 <= 1」判：盘中缺当天是正常的，
+    但差 2 天以上说明缓存没跟上（比如周五的数据用到下周一收盘后），必须回源。
+    拿不到实时交易日时退回自然日兜底，容忍一个周末。
+    """
+    last = str(last_day)[:10]
+    if expect_day:
+        try:
+            gap = (datetime.strptime(str(expect_day)[:10], '%Y-%m-%d')
+                   - datetime.strptime(last, '%Y-%m-%d')).days
+            return 0 <= gap <= 1
+        except Exception:
+            return False
+    return _days_old(last) <= 4
+
+
+def get_historical_data(etf_code: str, market: str, count: int = 10,
+                        expect_day: Optional[str] = None) -> pd.DataFrame:
     """获取历史K线数据（优先从各级缓存读取，缓存过旧则回源）"""
     try:
         symbol = f"{market}{etf_code}"
@@ -567,8 +586,7 @@ def get_historical_data(etf_code: str, market: str, count: int = 10) -> pd.DataF
         # 1. 优先用内存K线缓存（filter_by_volume 时预取）
         if symbol in _kline_cache and len(_kline_cache[symbol]) >= count:
             data = _kline_cache[symbol]
-            # 超过 4 个自然日未更新（含一个周末）说明缓存已经跟不上行情，回源
-            if _days_old(data[-1].get('day')) <= 4:
+            if _is_fresh(data[-1].get('day'), expect_day):
                 df = pd.DataFrame(data[-count:])
                 df['date'] = pd.to_datetime(df['day'])
                 df['close'] = df['close'].astype(float)
@@ -578,7 +596,7 @@ def get_historical_data(etf_code: str, market: str, count: int = 10) -> pd.DataF
 
         # 2. 再从动量策略缓存读取（同样要校验新鲜度，否则 ATR 会停在两周前）
         cached = get_historical_from_cache(etf_code, market)
-        if cached and len(cached) >= count and _days_old(cached[-1].get('day')) <= 4:
+        if cached and len(cached) >= count and _is_fresh(cached[-1].get('day'), expect_day):
             _kline_cache[symbol] = cached  # 回写到内存缓存
             df = pd.DataFrame(cached[-count:])
             df['date'] = pd.to_datetime(df['day'])
@@ -665,14 +683,16 @@ def calculate_oversold_analysis(etf_list: List[Dict]) -> List[Dict]:
     
     def analyze_one(etf):
         try:
-            historical_df = get_historical_data(etf['code'], etf['market'], count=ATR_PERIOD + 10)
-            if historical_df.empty or len(historical_df) < 10:
-                return None
-            
             current_price, today_pct, trade_date = get_realtime_price(etf['code'], etf['market'])
             if current_price is None:
                 return None
-            
+
+            # 先拿实时交易日，再决定历史K线要不要回源——ATR/MA 都必须踩在最新一根上
+            historical_df = get_historical_data(etf['code'], etf['market'],
+                                                count=ATR_PERIOD + 10, expect_day=trade_date)
+            if historical_df.empty or len(historical_df) < 10:
+                return None
+
             # 检查腾讯交易日期与K线最新日期是否一致（判断是否交易日）
             # K 线多取了 20 根给 ATR 用，MA10 只取最后 10 根
             closes = historical_df['close'].astype(float).iloc[-10:]
