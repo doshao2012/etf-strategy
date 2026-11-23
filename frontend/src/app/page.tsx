@@ -442,7 +442,7 @@ function OversoldCard({ etf, rank }: { etf: OversoldETF; rank: number }) {
           <div className="bg-slate-50 rounded-lg p-3" title="ATR(20) = 近 20 个交易日真实波幅的均值，加仓与止盈的 1ATR 都按它算">
             <p className="text-xs text-slate-500 mb-1">ATR(20)</p>
             <p className="text-base font-semibold text-slate-700">
-              {etf.atr20 != null ? etf.atr20.toFixed(3) : '—'}
+              {etf.atr20 != null ? etf.atr20.toFixed(4) : '—'}
               {etf.atr20Pct != null && (
                 <span className="ml-1.5 text-xs font-normal text-slate-400">
                   ≈{etf.atr20Pct.toFixed(2)}%
